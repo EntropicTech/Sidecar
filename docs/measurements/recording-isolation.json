@@ -1,0 +1,428 @@
+{
+  "date": "2026-11-01",
+  "scope": "Isolated XDG/session bus, real desktop processes and GPUs; no application routing changes or gaming experiment.",
+  "responsiveness": {
+    "before": {
+      "synthetic_recording_mib": 127.95,
+      "sample_rows": 2425,
+      "concurrent_readers": 2,
+      "completed_read_requests": 7,
+      "read_seconds": 2.4307688570006576,
+      "snapshot_calls": 4,
+      "snapshot_errors": 0,
+      "max_snapshot_seconds": 0.8671500260024914,
+      "distinct_live_samples": 4,
+      "persisted_live_samples": 7,
+      "dashboard_telemetry_updates": 0,
+      "baseline": true,
+      "limits": "Synthetic recording, real isolated collector; timings include CLI startup. Not a gaming or idle-overhead measurement."
+    },
+    "release_after": {
+      "synthetic_recording_mib": 127.98,
+      "sample_rows": 2426,
+      "concurrent_readers": 2,
+      "completed_read_requests": 18,
+      "read_seconds": 2.0999366210016888,
+      "snapshot_calls": 25,
+      "snapshot_errors": 0,
+      "stop_during_export_seconds": 0.006282941001700237,
+      "max_snapshot_seconds": 0.006642797998210881,
+      "distinct_live_samples": 9,
+      "persisted_live_samples": 10,
+      "dashboard_telemetry_updates": 0,
+      "baseline": false,
+      "collector_sha256": "5201d5c3407b89ac17286fa5b7b303896cdb6776829cd2b83bdc440532ca27bd",
+      "limits": "Synthetic recording, real isolated collector; timings include CLI startup. Not a gaming or idle-overhead measurement."
+    },
+    "native_debug_after": {
+      "synthetic_recording_mib": 127.98,
+      "sample_rows": 2426,
+      "concurrent_readers": 2,
+      "completed_read_requests": 2,
+      "read_seconds": 3.5096676670000306,
+      "snapshot_calls": 36,
+      "snapshot_errors": 0,
+      "stop_during_export_seconds": 0.010465169994859025,
+      "max_snapshot_seconds": 0.01989826800127048,
+      "distinct_live_samples": 15,
+      "persisted_live_samples": 16,
+      "dashboard_telemetry_updates": 4,
+      "baseline": false,
+      "collector_sha256": "4964f2193f6a3edc687c98e239806d86ecfe969e95a96ced61c4fc999a3a4335",
+      "limits": "Synthetic recording, real isolated collector; timings include CLI startup. Not a gaming or idle-overhead measurement."
+    }
+  },
+  "initial_io_isolation_footprint": {
+    "before-1": {
+      "seconds_per_mode": 30,
+      "limitations": "Three sequential idle-desktop modes in one collector instance, one run each; later RSS includes earlier ring-buffer/recording allocations. Not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.",
+      "modes": [
+        {
+          "mode": "collector-only",
+          "seconds": 30.000065052998252,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.5999986989428562,
+              "cpu_with_reaped_children_percent": 0.5999986989428562,
+              "rss_mib": 23.40625
+            }
+          },
+          "database_bytes": 28672,
+          "diagnostic_log_bytes": 2054,
+          "diagnostic_log_lines": 7
+        },
+        {
+          "mode": "recording-250ms",
+          "seconds": 30.000066586002504,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 1.866662523546818,
+              "cpu_with_reaped_children_percent": 2.1333285983392205,
+              "rss_mib": 76.44921875
+            }
+          },
+          "database_bytes": 11026432,
+          "diagnostic_log_bytes": 2845,
+          "diagnostic_log_lines": 10
+        },
+        {
+          "mode": "dashboard-open",
+          "seconds": 30.00006194099842,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.8333316127535964,
+              "cpu_with_reaped_children_percent": 1.0999977288347471,
+              "rss_mib": 91.31640625
+            },
+            "desktop": {
+              "cpu_percent_one_core": 1.7333297545274806,
+              "cpu_with_reaped_children_percent": 1.7333297545274806,
+              "rss_mib": 126.0234375
+            }
+          },
+          "database_bytes": 11042816,
+          "diagnostic_log_bytes": 4487,
+          "diagnostic_log_lines": 16
+        }
+      ],
+      "gpus": [
+        {
+          "pci": "0000:03:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+        },
+        {
+          "pci": "0000:0e:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+        }
+      ],
+      "coverage": {
+        "clients_observed": 21,
+        "fdinfo_scan_interval_ms": 5000,
+        "permission_denied": 4,
+        "processes_inspected": 156,
+        "processes_seen": 535,
+        "unidentifiable_clients": 0,
+        "vanished": 0
+      }
+    },
+    "after-1": {
+      "seconds_per_mode": 30,
+      "limitations": "Three sequential idle-desktop modes in one collector instance, one run each; later RSS includes earlier ring-buffer/recording allocations. Not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.",
+      "modes": [
+        {
+          "mode": "collector-only",
+          "seconds": 30.000062772000092,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.6333320081494376,
+              "cpu_with_reaped_children_percent": 0.6333320081494376,
+              "rss_mib": 22.56640625
+            }
+          },
+          "database_bytes": 4096,
+          "diagnostic_log_bytes": 2054,
+          "diagnostic_log_lines": 7
+        },
+        {
+          "mode": "recording-250ms",
+          "seconds": 30.000065577001806,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 1.6666630235078632,
+              "cpu_with_reaped_children_percent": 1.8999958467989642,
+              "rss_mib": 76.67578125
+            }
+          },
+          "database_bytes": 10919936,
+          "diagnostic_log_bytes": 2845,
+          "diagnostic_log_lines": 10
+        },
+        {
+          "mode": "dashboard-open",
+          "seconds": 30.000076044001617,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.8666644698455218,
+              "cpu_with_reaped_children_percent": 1.133330460567221,
+              "rss_mib": 93.921875
+            },
+            "desktop": {
+              "cpu_percent_one_core": 0.3999989860825485,
+              "cpu_with_reaped_children_percent": 0.3999989860825485,
+              "rss_mib": 126.375
+            }
+          },
+          "database_bytes": 10919936,
+          "diagnostic_log_bytes": 4487,
+          "diagnostic_log_lines": 16
+        }
+      ],
+      "gpus": [
+        {
+          "pci": "0000:03:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+        },
+        {
+          "pci": "0000:0e:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+        }
+      ],
+      "coverage": {
+        "clients_observed": 21,
+        "fdinfo_scan_interval_ms": 5000,
+        "permission_denied": 4,
+        "processes_inspected": 158,
+        "processes_seen": 537,
+        "unidentifiable_clients": 0,
+        "vanished": 0
+      }
+    },
+    "before-2": {
+      "seconds_per_mode": 30,
+      "limitations": "Three sequential idle-desktop modes in one collector instance, one run each; later RSS includes earlier ring-buffer/recording allocations. Not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.",
+      "modes": [
+        {
+          "mode": "collector-only",
+          "seconds": 30.000065271000494,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.5999986945828303,
+              "cpu_with_reaped_children_percent": 0.6333319553929876,
+              "rss_mib": 23.54296875
+            }
+          },
+          "database_bytes": 28672,
+          "diagnostic_log_bytes": 2054,
+          "diagnostic_log_lines": 7
+        },
+        {
+          "mode": "recording-250ms",
+          "seconds": 30.000064109997766,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 1.8333294155085091,
+              "cpu_with_reaped_children_percent": 1.9999957260092824,
+              "rss_mib": 78.49609375
+            }
+          },
+          "database_bytes": 11231232,
+          "diagnostic_log_bytes": 2846,
+          "diagnostic_log_lines": 10
+        },
+        {
+          "mode": "dashboard-open",
+          "seconds": 30.00006124999709,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.6999985708363191,
+              "cpu_with_reaped_children_percent": 0.9333314277817589,
+              "rss_mib": 94.08203125
+            },
+            "desktop": {
+              "cpu_percent_one_core": 0.39999918333503953,
+              "cpu_with_reaped_children_percent": 0.39999918333503953,
+              "rss_mib": 125.80078125
+            }
+          },
+          "database_bytes": 11247616,
+          "diagnostic_log_bytes": 4499,
+          "diagnostic_log_lines": 16
+        }
+      ],
+      "gpus": [
+        {
+          "pci": "0000:03:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+        },
+        {
+          "pci": "0000:0e:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+        }
+      ],
+      "coverage": {
+        "clients_observed": 21,
+        "fdinfo_scan_interval_ms": 5000,
+        "permission_denied": 4,
+        "processes_inspected": 162,
+        "processes_seen": 533,
+        "unidentifiable_clients": 0,
+        "vanished": 0
+      }
+    },
+    "after-2": {
+      "seconds_per_mode": 30,
+      "limitations": "Three sequential idle-desktop modes in one collector instance, one run each; later RSS includes earlier ring-buffer/recording allocations. Not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.",
+      "modes": [
+        {
+          "mode": "collector-only",
+          "seconds": 30.000064580999606,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.5999987083827883,
+              "cpu_with_reaped_children_percent": 0.5999987083827883,
+              "rss_mib": 23.44921875
+            }
+          },
+          "database_bytes": 4096,
+          "diagnostic_log_bytes": 2054,
+          "diagnostic_log_lines": 7
+        },
+        {
+          "mode": "recording-250ms",
+          "seconds": 30.00007665099838,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 1.733328904620298,
+              "cpu_with_reaped_children_percent": 1.9666616417807223,
+              "rss_mib": 80.890625
+            }
+          },
+          "database_bytes": 11022336,
+          "diagnostic_log_bytes": 2846,
+          "diagnostic_log_lines": 10
+        },
+        {
+          "mode": "dashboard-open",
+          "seconds": 30.000071391001256,
+          "processes": {
+            "collector": {
+              "cpu_percent_one_core": 0.8333313502546843,
+              "cpu_with_reaped_children_percent": 1.1333306363463707,
+              "rss_mib": 98.00390625
+            },
+            "desktop": {
+              "cpu_percent_one_core": 0.2999992860916863,
+              "cpu_with_reaped_children_percent": 0.2999992860916863,
+              "rss_mib": 125.83984375
+            }
+          },
+          "database_bytes": 11022336,
+          "diagnostic_log_bytes": 4488,
+          "diagnostic_log_lines": 16
+        }
+      ],
+      "gpus": [
+        {
+          "pci": "0000:03:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+        },
+        {
+          "pci": "0000:0e:00.0",
+          "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+        }
+      ],
+      "coverage": {
+        "clients_observed": 23,
+        "fdinfo_scan_interval_ms": 5000,
+        "permission_denied": 4,
+        "processes_inspected": 165,
+        "processes_seen": 533,
+        "unidentifiable_clients": 0,
+        "vanished": 0
+      }
+    }
+  },
+  "final_release_footprint": {
+    "seconds_per_mode": 30,
+    "limitations": "Three sequential idle-desktop modes in one collector instance, one run each; later RSS includes earlier ring-buffer/recording allocations. Not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.",
+    "modes": [
+      {
+        "mode": "collector-only",
+        "seconds": 30.00006868100172,
+        "processes": {
+          "collector": {
+            "cpu_percent_one_core": 0.6666651404256781,
+            "cpu_with_reaped_children_percent": 0.699998397446962,
+            "rss_mib": 23.12109375
+          }
+        },
+        "database_bytes": 4096,
+        "diagnostic_log_bytes": 2976,
+        "diagnostic_log_lines": 7
+      },
+      {
+        "mode": "recording-250ms",
+        "seconds": 30.00006624100206,
+        "processes": {
+          "collector": {
+            "cpu_percent_one_core": 1.7999960255486522,
+            "cpu_with_reaped_children_percent": 2.0666621034077117,
+            "rss_mib": 78.1484375
+          }
+        },
+        "database_bytes": 10862592,
+        "diagnostic_log_bytes": 4104,
+        "diagnostic_log_lines": 10
+      },
+      {
+        "mode": "dashboard-open",
+        "seconds": 30.000063779996708,
+        "processes": {
+          "collector": {
+            "cpu_percent_one_core": 0.8666648241373457,
+            "cpu_with_reaped_children_percent": 1.0999976614050926,
+            "rss_mib": 95.3203125
+          },
+          "desktop": {
+            "cpu_percent_one_core": 0.19999957480092592,
+            "cpu_with_reaped_children_percent": 0.19999957480092592,
+            "rss_mib": 124.98046875
+          }
+        },
+        "database_bytes": 10862592,
+        "diagnostic_log_bytes": 6416,
+        "diagnostic_log_lines": 16
+      }
+    ],
+    "artifacts_sha256": {
+      "igpu-mand": "5201d5c3407b89ac17286fa5b7b303896cdb6776829cd2b83bdc440532ca27bd",
+      "igpu-man-desktop": "1a59a88507ee64e3da02196c18065c96164b7fea7ff8d3cbcca0a3f8187455fe",
+      "igpu-man": "ceb2e0ec4e0e43f216a02e378ea5d7c4a3f114fbbcf619ed7ac3ff3795dd1488"
+    },
+    "gpus": [
+      {
+        "pci": "0000:03:00.0",
+        "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+      },
+      {
+        "pci": "0000:0e:00.0",
+        "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+      }
+    ],
+    "coverage": {
+      "clients_observed": 21,
+      "fdinfo_scan_interval_ms": 5000,
+      "permission_denied": 4,
+      "processes_inspected": 166,
+      "processes_seen": 550,
+      "unidentifiable_clients": 0,
+      "vanished": 0
+    }
+  },
+  "baseline_artifacts_sha256": {
+    "igpu-man-desktop": "e3a25d4ff4cadd3972612e1d882e061965a3aa726d7d16cdb40c5bb00574daef",
+    "igpu-mand": "a6bcbf43de44e403679b1ade8f9eaec7c075be3e8d48f07a01636aad2d060159",
+    "igpu-man": "5ce553a27ef212d3abed1b8f7436d0f521c74b4ab48f274c11afa0ecd7e816ab"
+  },
+  "limits": "Before/after synthetic reads use approximately 128 MiB. Alternating footprint runs cover the first isolation patch; final release includes subsequent hardening. Thirty seconds per mode, current desktop workload, ring not at steady state in the first mode. Occlusion/throttling uncontrolled; do not infer dashboard-rendering improvement or game-frame effects. CPU uses one core, quantization about 0.033 percentage points. No concurrent build during footprint measurement."
+}

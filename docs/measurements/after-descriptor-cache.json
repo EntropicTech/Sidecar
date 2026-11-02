@@ -1,0 +1,67 @@
+{
+  "seconds_per_mode": 30,
+  "limitations": "Three independent idle-desktop modes, one run each; not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.",
+  "modes": [
+    {
+      "mode": "collector-only",
+      "seconds": 30.000054763000662,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 0.5666656322563203,
+          "cpu_with_reaped_children_percent": 0.5666656322563203,
+          "rss_mib": 22.03125
+        }
+      },
+      "database_bytes": 28672
+    },
+    {
+      "mode": "recording-250ms",
+      "seconds": 30.00006521999967,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 1.633329782474404,
+          "cpu_with_reaped_children_percent": 1.933329130275825,
+          "rss_mib": 71.43359375
+        }
+      },
+      "database_bytes": 9539584
+    },
+    {
+      "mode": "dashboard-open",
+      "seconds": 30.000062672999775,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 0.7333318013298726,
+          "cpu_with_reaped_children_percent": 0.9999979109043717,
+          "rss_mib": 84.70703125
+        },
+        "desktop": {
+          "cpu_percent_one_core": 1.099997701994809,
+          "cpu_with_reaped_children_percent": 1.099997701994809,
+          "rss_mib": 122.921875
+        }
+      },
+      "database_bytes": 9555968
+    }
+  ],
+  "gpus": [
+    {
+      "pci": "0000:03:00.0",
+      "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+    },
+    {
+      "pci": "0000:0e:00.0",
+      "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+    }
+  ],
+  "coverage": {
+    "clients_observed": 17,
+    "fdinfo_scan_interval_ms": 5000,
+    "permission_denied": 4,
+    "processes_inspected": 131,
+    "processes_seen": 511,
+    "unidentifiable_clients": 0,
+    "vanished": 0
+  },
+  "measurement_design_correction": "Modes ran sequentially in one collector instance, not independently; later RSS includes earlier recording/ring-buffer allocations."
+}

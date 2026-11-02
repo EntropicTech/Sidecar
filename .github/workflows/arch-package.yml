@@ -1,0 +1,30 @@
+name: arch-package
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install package build dependencies
+        run: |
+          pacman -Syu --noconfirm rust cargo python dbus libglvnd libxkbcommon wayland libx11 libxcb fontconfig namcap desktop-file-utils git
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+      - name: Build pinned source package as an unprivileged user
+        run: |
+          runuser -u builder -- make dist
+          runuser -u builder -- bash -c 'cd dist && makepkg --cleanbuild --noconfirm'
+          runuser -u builder -- bash -c 'cd dist && makepkg --printsrcinfo > .SRCINFO && namcap PKGBUILD *.pkg.tar.zst'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: |
+            dist/*.pkg.tar.zst
+            dist/PKGBUILD
+            dist/.SRCINFO
+            dist/SHA256SUMS
+            dist/igpu-man-*.tar.gz
+          include-hidden-files: true

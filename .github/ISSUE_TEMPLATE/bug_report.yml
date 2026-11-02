@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a reproducible Sidecar problem
+body:
+  - type: markdown
+    attributes:
+      value: "Keep reports free of browsing data, complete arguments/environments, profile environment values and private recordings. Review diagnostics before posting."
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and expected/actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Sidecar build, kernel/Mesa/Plasma versions and GPU PCI identities
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Reviewed diagnostics, availability/coverage and relevant event names

@@ -1,0 +1,33 @@
+name: prepare-release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tested version tag, e.g. v0.1.0
+        required: true
+permissions:
+  contents: write
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Install build tools
+        run: pacman -Syu --noconfirm python git github-cli
+      - name: Prepare reviewed source assets
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 -c 'import os,tomllib; from pathlib import Path; assert os.environ["RELEASE_TAG"]=="v"+tomllib.loads(Path("Cargo.toml").read_text())["workspace"]["package"]["version"]'
+          useradd --create-home builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+          runuser -u builder -- make dist
+      - name: Create draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "Sidecar $RELEASE_TAG" --notes-file CHANGELOG.md dist/igpu-man-*.tar.gz dist/SHA256SUMS dist/PKGBUILD dist/.SRCINFO

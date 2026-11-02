@@ -1,0 +1,7 @@
+os,cpu,gpu
+Linux,AMD Ryzen,AMD Radeon
+fps,frametime,gpu_load,elapsed
+100,10,30,10000000
+100,10,35,20000000
+50,20,40,40000000
+25,40,50,80000000

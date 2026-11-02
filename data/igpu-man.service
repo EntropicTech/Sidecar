@@ -1,0 +1,19 @@
+[Unit]
+Description=Sidecar GPU workload collector
+Documentation=https://docs.kernel.org/gpu/drm-usage-stats.html
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=dbus
+BusName=io.github.igpu_man.Collector
+ExecStart=/usr/bin/igpu-mand
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=graphical-session.target

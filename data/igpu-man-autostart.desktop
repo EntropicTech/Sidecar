@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Sidecar
+Comment=Start GPU workload monitoring in the system tray
+Exec=igpu-man-desktop --tray
+TryExec=igpu-man-desktop
+Icon=igpu-man
+Terminal=false
+OnlyShowIn=KDE;
+StartupNotify=false

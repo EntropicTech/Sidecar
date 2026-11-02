@@ -1,0 +1,26 @@
+schema_version = 1
+sample_interval_ms = 1000
+recording_interval_ms = 250
+storage_limit_mb = 1024
+stutter_threshold_ms = 33.3
+notifications = false
+
+# Prefer Applications → Managed elsewhere, or `igpu-man manage PATH --elsewhere`.
+# Entries identify executable paths rather than a particular process or PID.
+managed_elsewhere = []
+
+# Copy the real PCI addresses from `igpu-man status`.
+# [aliases]
+# igpu = "0000:0e:00.0"
+# dgpu = "0000:03:00.0"
+
+# Prefer `igpu-man profile save` or the dashboard: both resolve aliases to PCI IDs.
+# [[profiles]]
+# name = "browser-side"
+# executable = "firefox"
+# args = []
+# gpu = "0000:0e:00.0"
+# firefox = true
+# vulkan_only = false
+# record = false
+# mangohud = false

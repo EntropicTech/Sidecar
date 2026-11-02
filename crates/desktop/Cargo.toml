@@ -1,0 +1,21 @@
+[package]
+name = "igpu-man-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[features]
+screenshot = ["dep:image"]
+
+[dependencies]
+clap.workspace = true
+igpu-core.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+zbus.workspace = true
+eframe = { version = "0.31", default-features = false, features = ["glow", "wayland", "x11", "default_fonts"] }
+ksni = "0.3"
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }

@@ -1,0 +1,14 @@
+/target/
+/dist/
+__pycache__/
+*.sqlite*
+*.jsonl
+*.log
+*.csv
+!tests/fixtures/*.csv
+
+
+# Agent/runtime state is never part of published source.
+.agents/
+.codex/
+.aws/

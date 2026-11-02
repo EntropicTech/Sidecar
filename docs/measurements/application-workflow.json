@@ -1,0 +1,54 @@
+{
+  "seconds_per_mode": 30,
+  "limitations": "Two sequential 30-second observations, collector-only then Applications view with live candidate queries. One run per mode on the current desktop workload; not a gaming comparison. CPU percentages use one core. Private bus has no tray watcher; temporary XDG settings, no managed trials. Later RSS includes the earlier ring buffer. CPU tick quantization is approximately 0.033 percentage points.",
+  "modes": [
+    {
+      "mode": "collector-only",
+      "seconds": 30.00006252300227,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 0.6333320134060363,
+          "cpu_with_reaped_children_percent": 0.6333320134060363,
+          "rss_mib": 23.5859375
+        }
+      },
+      "database_bytes": 28672
+    },
+    {
+      "mode": "applications-open",
+      "seconds": 30.000065033000283,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 0.7999982657904186,
+          "cpu_with_reaped_children_percent": 1.0333310933126238,
+          "rss_mib": 40.30859375
+        },
+        "desktop": {
+          "cpu_percent_one_core": 1.8333293591030426,
+          "cpu_with_reaped_children_percent": 1.8333293591030426,
+          "rss_mib": 123.5234375
+        }
+      },
+      "database_bytes": 28672
+    }
+  ],
+  "gpus": [
+    {
+      "pci": "0000:03:00.0",
+      "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+    },
+    {
+      "pci": "0000:0e:00.0",
+      "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+    }
+  ],
+  "coverage": {
+    "clients_observed": 21,
+    "fdinfo_scan_interval_ms": 5000,
+    "permission_denied": 4,
+    "processes_inspected": 142,
+    "processes_seen": 519,
+    "unidentifiable_clients": 0,
+    "vanished": 0
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "seconds_per_mode": 30,
+  "limitations": "Three sequential idle-desktop modes in one collector instance, one run each; later RSS includes earlier ring-buffer/recording allocations. Not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.",
+  "modes": [
+    {
+      "mode": "collector-only",
+      "seconds": 30.00006236199988,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 0.46666569659312956,
+          "cpu_with_reaped_children_percent": 0.46666569659312956,
+          "rss_mib": 23.37890625
+        }
+      },
+      "database_bytes": 28672,
+      "diagnostic_log_bytes": 2054,
+      "diagnostic_log_lines": 7
+    },
+    {
+      "mode": "recording-250ms",
+      "seconds": 30.00005629399675,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 1.5333304560900096,
+          "cpu_with_reaped_children_percent": 1.7666633515819676,
+          "rss_mib": 75.41796875
+        }
+      },
+      "database_bytes": 10047488,
+      "diagnostic_log_bytes": 2846,
+      "diagnostic_log_lines": 10
+    },
+    {
+      "mode": "dashboard-open",
+      "seconds": 30.000062383001932,
+      "processes": {
+        "collector": {
+          "cpu_percent_one_core": 0.7333318084186793,
+          "cpu_with_reaped_children_percent": 1.0333311845899573,
+          "rss_mib": 89.3984375
+        },
+        "desktop": {
+          "cpu_percent_one_core": 0.23333284813321617,
+          "cpu_with_reaped_children_percent": 0.23333284813321617,
+          "rss_mib": 124.96875
+        }
+      },
+      "database_bytes": 10063872,
+      "diagnostic_log_bytes": 4499,
+      "diagnostic_log_lines": 16
+    }
+  ],
+  "gpus": [
+    {
+      "pci": "0000:03:00.0",
+      "name": "Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XT/7900 XTX/7900 GRE/7900M] (rev cc)"
+    },
+    {
+      "pci": "0000:0e:00.0",
+      "name": "Advanced Micro Devices, Inc. [AMD/ATI] Granite Ridge [Radeon 610M] (rev cb)"
+    }
+  ],
+  "coverage": {
+    "clients_observed": 20,
+    "fdinfo_scan_interval_ms": 5000,
+    "permission_denied": 4,
+    "processes_inspected": 148,
+    "processes_seen": 521,
+    "unidentifiable_clients": 0,
+    "vanished": 0
+  }
+}

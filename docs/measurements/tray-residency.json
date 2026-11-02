@@ -1,0 +1,109 @@
+{
+  "date": "2026-11-01",
+  "private_native": {
+    "live_plasma": false,
+    "cycles": [
+      {
+        "cycle": 1,
+        "close_activate_seconds": 0.561,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 2,
+        "close_activate_seconds": 0.56,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 3,
+        "close_activate_seconds": 0.605,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 4,
+        "close_activate_seconds": 0.606,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 5,
+        "close_activate_seconds": 0.605,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 6,
+        "close_activate_seconds": 0.563,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      }
+    ],
+    "watcher_loss_reopens": true,
+    "watcher_return_recovers": true,
+    "quit_from_tray_while_parked": true
+  },
+  "live_plasma": {
+    "live_plasma": true,
+    "cycles": [
+      {
+        "cycle": 1,
+        "close_activate_seconds": 0.567,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 2,
+        "close_activate_seconds": 0.566,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 3,
+        "close_activate_seconds": 0.606,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 4,
+        "close_activate_seconds": 0.608,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 5,
+        "close_activate_seconds": 0.607,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      },
+      {
+        "cycle": 6,
+        "close_activate_seconds": 0.611,
+        "same_pid": true,
+        "parked_updates_stopped": true
+      }
+    ],
+    "quit_from_tray_while_parked": true
+  },
+  "release_overhead": {
+    "binary_sha256": "edf0487cd6579f22df2c8363df458c00056fdd557c139c4475b93cc41c5fc37e",
+    "modes": [
+      {
+        "mode": "window-open",
+        "seconds": 30.000063982006395,
+        "cpu_percent_one_core": 0.46666567139313436,
+        "rss_mib": 127.65625,
+        "ui_updates": 344
+      },
+      {
+        "mode": "tray-only",
+        "seconds": 30.00006339600077,
+        "cpu_percent_one_core": 0.0,
+        "rss_mib": 127.0703125,
+        "ui_updates": 0
+      }
+    ],
+    "limits": "One sequential 30-second observation per mode on the current desktop/real Plasma tray, with a separate collector running. CPU is percent of one core; quantization ~0.033 points. Window occlusion and workload not controlled. RSS may retain driver/allocator caches; no GPU or game-frame effect measured."
+  }
+}

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Sidecar
+GenericName=GPU Workload Manager
+Comment=Observe GPU placement and compare gaming performance
+Exec=igpu-man-desktop
+Icon=igpu-man
+Terminal=false
+Categories=System;Monitor;
+Keywords=GPU;AMD;gaming;performance;Sidecar;igpu-man;
+StartupNotify=true

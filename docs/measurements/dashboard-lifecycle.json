@@ -1,0 +1,184 @@
+{
+  "date": "2026-11-01",
+  "scope": "Native dashboard processes on this Plasma Wayland desktop; private mode owns its daemon/data, live mode only reads real collector state. Timings include controller startup/status checks; not collector or gaming overhead. The 28 exits include old/new rapid-reopen pairs; concurrent non-owner starters also exited successfully.",
+  "results": {
+    "private": {
+      "live_plasma": false,
+      "cycles": [
+        {
+          "test": "Close",
+          "pid": 936740,
+          "seconds": 0.0338,
+          "exit_code": 0
+        },
+        {
+          "test": "Quit",
+          "pid": 937014,
+          "seconds": 0.0338,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 937283,
+          "seconds": 0.0338,
+          "exit_code": 0
+        },
+        {
+          "test": "Quit",
+          "pid": 937553,
+          "seconds": 0.0339,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 937822,
+          "seconds": 0.0339,
+          "exit_code": 0
+        },
+        {
+          "test": "Quit",
+          "pid": 938091,
+          "seconds": 0.0178,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 938369,
+          "seconds": 0.0338,
+          "exit_code": 0
+        },
+        {
+          "test": "Quit",
+          "pid": 938638,
+          "seconds": 0.0335,
+          "exit_code": 0
+        },
+        {
+          "test": "rapid reopen: old Quit",
+          "pid": 938907,
+          "seconds": 0.0339,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 939032,
+          "seconds": 0.0339,
+          "exit_code": 0
+        },
+        {
+          "test": "rapid reopen: old Quit",
+          "pid": 939175,
+          "seconds": 0.0338,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 939300,
+          "seconds": 0.0337,
+          "exit_code": 0
+        },
+        {
+          "test": "Quit",
+          "pid": 939445,
+          "seconds": 0.0337,
+          "exit_code": 0
+        },
+        {
+          "test": "Quit",
+          "pid": 939658,
+          "seconds": 0.0183,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 939839,
+          "seconds": 0.0656,
+          "exit_code": 0
+        }
+      ]
+    },
+    "plasma": {
+      "live_plasma": true,
+      "cycles": [
+        {
+          "test": "Close",
+          "pid": 940005,
+          "seconds": 0.0334,
+          "exit_code": 0
+        },
+        {
+          "test": "Plasma tray Quit",
+          "pid": 940240,
+          "seconds": 0.0344,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 940477,
+          "seconds": 0.0333,
+          "exit_code": 0
+        },
+        {
+          "test": "Plasma tray Quit",
+          "pid": 940712,
+          "seconds": 0.0344,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 940949,
+          "seconds": 0.0334,
+          "exit_code": 0
+        },
+        {
+          "test": "Plasma tray Quit",
+          "pid": 941184,
+          "seconds": 0.0342,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 941421,
+          "seconds": 0.0334,
+          "exit_code": 0
+        },
+        {
+          "test": "Plasma tray Quit",
+          "pid": 941656,
+          "seconds": 0.0345,
+          "exit_code": 0
+        },
+        {
+          "test": "rapid reopen: old Quit",
+          "pid": 941893,
+          "seconds": 0.0659,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 941999,
+          "seconds": 0.0335,
+          "exit_code": 0
+        },
+        {
+          "test": "rapid reopen: old Quit",
+          "pid": 942127,
+          "seconds": 0.0337,
+          "exit_code": 0
+        },
+        {
+          "test": "Close",
+          "pid": 942252,
+          "seconds": 0.0656,
+          "exit_code": 0
+        },
+        {
+          "test": "Quit",
+          "pid": 942379,
+          "seconds": 0.0655,
+          "exit_code": 0
+        }
+      ]
+    }
+  }
+}
