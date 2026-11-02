@@ -373,8 +373,10 @@ impl State {
                 );
                 let until = monotonic_ns() + 300_000_000_000;
                 live.update_lease = Some((token.into(), until));
+                let launches = live.collector.launches.clone();
+                drop(live);
                 Ok(
-                    json!({"launches":live.collector.launches,"lease_until_ns":until,"storage_schema":1,"config_schema":1}),
+                    json!({"launches":launches,"lease_until_ns":until,"storage_schema":1,"config_schema":1}),
                 )
             }
             Operation::CancelUpdate => {
