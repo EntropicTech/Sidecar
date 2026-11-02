@@ -7,7 +7,9 @@ url='https://github.com/EntropicTech/Sidecar'
 arch=('x86_64')
 license=('MIT')
 # Cargo release artifacts are already stripped; retain manifest hashes.
-options=('!strip')
+# Bundled SQLite is C; GCC object LTO is incompatible with Rust/LLVM linking.
+# Cargo retains its own thin Rust LTO.
+options=('!strip' '!lto')
 depends=('gcc-libs' 'glibc' 'dbus' 'systemd' 'libglvnd' 'libxkbcommon' 'wayland' 'libx11' 'libxcb' 'fontconfig')
 makedepends=('rust>=1.89' 'cargo' 'pkgconf' 'python')
 optdepends=('mangohud: game frame logging' 'lib32-mangohud: 32-bit game frame logging'

@@ -60,7 +60,8 @@ Submit only generated metadata that matches the published source archive. Do not
 use `SKIP` checksums for a fixed release, add binaries to AUR, or reference a local
 checkout in a public recipe.
 
-Rust dependencies are fetched in prepare with `--locked`; build/check use
+Arch GCC object LTO is disabled for the bundled SQLite C objects; Cargo keeps
+its own thin Rust LTO. Rust dependencies are fetched in prepare with `--locked`; build/check use
 `--frozen` and a controlled target directory. Production does not enable the
 screenshot/failure-injection feature. The Arch CI job builds a real package as a
 non-root user in a fresh Arch container and runs namcap. This is useful isolation,
