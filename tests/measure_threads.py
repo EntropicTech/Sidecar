@@ -50,18 +50,28 @@ def main():
                 assert all(p.poll() is None for p in children),'Fixture process exited'
                 time.sleep(.04)
             raise AssertionError('Private fixture did not become ready')
+        # Never forward control to an already running collector/dashboard.
+        if run('igpu-man','status','--json').returncode == 0:
+            raise RuntimeError('Existing collector left untouched; use dbus-run-session')
+        existing=json.loads(run('igpu-man-desktop','--status').stdout)
+        if existing.get('running') is not False:
+            raise RuntimeError('Existing dashboard left untouched; use dbus-run-session')
         try:
             children.append(subprocess.Popen([BIN/'igpu-mand'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             wait_ready('igpu-man','status','--json')
             children.append(subprocess.Popen([ROOT/'target/debug/examples/tray_fixture'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             children.append(subprocess.Popen([BIN/'igpu-man-desktop','--tray'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             status=wait_ready('igpu-man-desktop','--status')
+            assert status.get('pid')==children[2].pid,'Unexpected dashboard owner'
+            assert all(p.poll() is None for p in children),'Fixture process exited'
             time.sleep(1)
             observed={'collector':children[0].pid,'cold_tray':children[2].pid}
             before={name:usage(pid) for name,pid in observed.items()}
             started=time.monotonic();time.sleep(args.seconds);elapsed=time.monotonic()-started
+            assert all(p.poll() is None for p in children),'Fixture exited during observation'
             after={name:usage(pid) for name,pid in observed.items()}
             final=json.loads(run('igpu-man-desktop','--status').stdout)
+            assert final.get('pid')==children[2].pid,'Dashboard owner changed'
             assert final['windows_created']==0 and final['updates']==0
             assert final['telemetry_wakeups']==status['telemetry_wakeups']
             hz=os.sysconf('SC_CLK_TCK');report={
