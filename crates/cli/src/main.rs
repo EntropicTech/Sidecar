@@ -28,6 +28,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Private build-tool bridge; JSON arrives on stdin, never in process arguments.
+    #[command(hide = true)]
+    InternalRequest {
+        operation: String,
+    },
     /// Read recent private structured logs. Output is a JSON array.
     Logs {
         #[arg(long, default_value="all", value_parser=["all","cli","daemon","desktop"])]
@@ -227,6 +232,17 @@ fn run() -> Result<()> {
         error.exit()
     });
     match cli.command {
+        Commands::InternalRequest { operation } => {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::io::stdin()
+                .take(1024 * 1024 + 1)
+                .read_to_end(&mut bytes)?;
+            anyhow::ensure!(bytes.len() <= 1024 * 1024, "Internal request exceeds 1 MiB");
+            let payload: Value = serde_json::from_slice(&bytes)?;
+            let result: Value = client::call(&operation, &payload)?;
+            print(&result)?;
+        }
         Commands::Logs { component, lines } => print(&serde_json::to_value(
             igpu_core::logging::tail(&component, lines as usize)?,
         )?)?,

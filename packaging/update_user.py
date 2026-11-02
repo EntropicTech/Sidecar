@@ -25,16 +25,16 @@ NAMES=['igpu-man','igpu-mand','igpu-man-desktop']
 
 class UpdateError(RuntimeError): pass
 
-def run(args, *, timeout=35, check=True, env=None, cwd=None):
-    p=subprocess.run(list(map(str,args)),capture_output=True,text=True,timeout=timeout,env=env,cwd=cwd)
+def run(args, *, timeout=35, check=True, env=None, cwd=None, input_text=None):
+    p=subprocess.run(list(map(str,args)),capture_output=True,text=True,timeout=timeout,env=env,cwd=cwd,input=input_text)
     if check and p.returncode:raise UpdateError(f'{Path(str(args[0])).name} failed (exit {p.returncode}); inspect the update journal/systemd user journal')
     return p
 
 def rpc(method,value=None):
     value=dict(value or {},_request_id=f'{os.getpid()}-{time.monotonic_ns()}-1')
-    p=run(['busctl','--user','--json=short','call',BUS,OBJECT,INTERFACE,'Request','ss',method,json.dumps(value)],check=False)
+    p=run([ROOT/'target/release/igpu-man','internal-request',method],input_text=json.dumps(value),check=False)
     if p.returncode:raise UpdateError(f'Collector rejected {method}; no request payload was logged. Check recording/maintenance state.')
-    return json.loads(json.loads(p.stdout)['data'][0])
+    return json.loads(p.stdout)
 
 def atomic(path,data,mode=0o600):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)

@@ -53,5 +53,6 @@ update-user:
 	$(MAKE) build
 	python3 packaging/update_user.py --prefix "$(USER_PREFIX)"
 recover-user:
+	$(MAKE) build
 	@test -n "$(RUN)" || (echo 'Set RUN to the private interrupted update directory' >&2; exit 2)
 	python3 packaging/update_user.py --prefix "$(USER_PREFIX)" --recover "$(RUN)"

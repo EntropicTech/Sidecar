@@ -31,7 +31,7 @@ def check():
             errors.append(f"Documentation index omits {path.relative_to(ROOT)}")
     cli = (ROOT / "crates/cli/src/main.rs").read_text().split("enum Commands {", 1)[1].split("enum ProfileCommand", 1)[0]
     for variant in re.findall(r"^    ([A-Z][A-Za-z0-9]+)\s*(?:\{|,)", cli, re.M):
-        if variant == "TryProfile":  # Internal argv-preserving trial wrapper.
+        if variant in {"TryProfile", "InternalRequest"}:  # Internal argv-preserving trial wrapper.
             continue
         command = re.sub(r"(?<!^)(?=[A-Z])", "-", variant).lower()
         if not re.search(r"\bigpu-man\s+" + re.escape(command) + r"(?:\s|`|$)", readme):

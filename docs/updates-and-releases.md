@@ -45,7 +45,8 @@ make recover-user RUN=/absolute/path/to/run-transaction
 ```
 
 Recovery refuses an active recording and leaves saved user data untouched. Keep
-free space for staged binaries plus a database/program backup. No updater runs
+free space for staged binaries plus a database/program backup. A hidden, bounded stdin-to-D-Bus CLI bridge keeps registration payloads/nonces
+out of process arguments; recovery builds that bridge before use. No updater runs
 in the background; there is no automatic download, poller or privilege helper.
 
 ## Packaging and release bar
