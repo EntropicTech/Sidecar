@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Modest collector async-worker sizing and a current-thread tray runtime, with
+  an isolated local thread/CPU/memory measurement tool.
+
 - Application launch-path explanations, matching-profile actions and honest
   unknown/unregistered states without extra process scanning.
 - Cached software-version probes and event-driven parked dashboard telemetry.

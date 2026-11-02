@@ -767,7 +767,9 @@ impl Service {
     }
 }
 
-#[tokio::main]
+// Async I/O/control needs modest parallelism; filesystem/CSV/SQLite work runs
+// on separate blocking workers or the ordered writer, not on these executors.
+#[tokio::main(worker_threads = 2)]
 async fn main() -> std::process::ExitCode {
     igpu_core::logging::init("daemon");
     let result = run().await;

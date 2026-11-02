@@ -232,3 +232,15 @@ context. Do not add root/ptrace capabilities or change global kernel permissions
 A persistent sandbox reduction needs explicit review. See the public
 [systemd execution documentation](https://freedesktop.org/software/systemd/man/latest/systemd.exec.html)
 and [procfs access-mode checks](https://man.archlinux.org/man/ptrace.2.en).
+
+
+Thread counts exceed the configured async worker count: the collector also has
+its main thread, ordered writer and on-demand blocking workers; the desktop has
+native/UI workers and a dependency-managed D-Bus executor. The tray's own async
+runtime uses its existing dedicated thread. A quiet tray can therefore retain
+threads and virtual address-space reservations while consuming no measurable CPU
+in a short observation. Virtual memory is not resident RAM. For isolated local
+measurements build release binaries and the tray_fixture example, then run
+`dbus-run-session -- python3 tests/measure_threads.py /tmp/threads.json`.
+The script never changes the installed service. Keep machine-specific reports
+local unless sharing is explicitly authorized.

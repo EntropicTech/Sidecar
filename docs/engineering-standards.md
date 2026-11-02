@@ -172,3 +172,12 @@ Reuse existing accounting and respect exclusions. Cache static diagnostic probes
 outside sampling; preserve explicit freshness limits and missing-tool recovery.
 Parked telemetry must block on events and be explicitly woken when visibility
 changes. Test cold start, repeated park/reopen and quiet wake-up counters.
+
+
+Choose async executor sizes for the actual I/O/control workload. A dedicated
+thread that continuously drives a current-thread runtime must keep driving it
+while parked. Do not shrink pools by mutating the application's inherited global
+runtime environment. Validate real tray/IPC progress, sampling under concurrent
+recording reads, failure recovery, CPU/RSS and OS thread counts; fewer threads do
+not by themselves prove lower CPU, lower physical RAM or better game frametimes.
+Dependency-owned runtimes must be included when explaining total thread counts.

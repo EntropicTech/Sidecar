@@ -498,3 +498,37 @@ is needed (Q22): filesystem mount sandboxing in a user manager can implicitly
 create a user namespace and prevent cross-process procfs access. Any service-policy
 change requires separate review; the current unit has not been changed by this pass.
 No private live-install diagnostics are published in this service caveat.
+
+
+## Async runtime sizing — November 1, 2026
+
+The collector's async executor is configured with two workers; the SNI service
+uses a current-thread runtime driven by its existing dedicated thread. Blocking
+jobs, ordered writes and the dependency-owned D-Bus executor remain independent.
+No global runtime environment or installed-service sandbox setting is changed.
+
+Local `make check`/`make test` passed (53 Rust tests plus private-bus integration,
+maintenance-lease and recording responsiveness). Native cold startup without a
+display, delayed/missing tray host, quiet cold/warm parking, reopen/rapid activation,
+watcher recovery, eleven dashboard lifecycle cases and worker failure/poison
+recovery passed. Native synthetic large-recording reads preserved live snapshots,
+Stop and dashboard telemetry progress. Staged packaging and isolated updater
+success/refusal/rollback/recovery checks passed.
+
+An isolated release benchmark supports before/after CPU, resident and virtual
+memory, OS thread counts, cold-tray window/update/wake counters and binary hashes.
+Measurement outputs are explicitly requested local files with private permissions;
+machine-specific results are kept local, not included in the public repository.
+Short observations and an uncontrolled desktop do not establish a universal CPU,
+physical-memory, game-frametime or total OS-thread bound. Virtual address-space
+reservation must not be described as resident RAM. The existing installed-service
+procfs compatibility issue (Q22) is a separate acceptance item.
+
+Reproduce a local observation after building the release and tray fixture:
+
+```sh
+cargo build -p igpu-man-desktop --example tray_fixture --locked
+dbus-run-session -- python3 tests/measure_threads.py /tmp/threads.json --seconds 60
+# IGPU_MAN_BIN_DIR can point at a preserved before build. Independent session
+# buses can run a pair concurrently; never use the real service as test cleanup.
+```

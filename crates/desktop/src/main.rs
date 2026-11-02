@@ -238,7 +238,12 @@ impl Dashboard {
         let watcher_seen = Arc::new(Mutex::new(false));
         std::thread::spawn(move || {
             use ksni::TrayMethods;
-            let runtime = match tokio::runtime::Runtime::new() {
+            // This dedicated OS thread continuously drives SNI/D-Bus I/O.
+            // It does not need another CPU-sized async worker pool.
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
                 Ok(runtime) => runtime,
                 Err(error) => {
                     igpu_core::logging::event(

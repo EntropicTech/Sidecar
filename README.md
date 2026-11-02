@@ -51,6 +51,12 @@ resolved executable or Arch package-database metadata changes (checked every 30
 seconds). KWin/display diagnostics retain their separate 30-second refresh; GPU
 sensors and hardware/connector discovery keep their normal sampling cadence.
 
+The collector uses two async executor workers, with filesystem/recording work on
+separate blocking workers and the ordered database writer. The tray's dedicated
+thread drives a single-thread async event loop. Total process thread counts also
+include dependency-managed runtimes and on-demand workers; launched applications'
+Tokio environment is not changed.
+
 Low overhead is a project requirement: one-second normal sampling, bounded shared
 history, sleeping workers, and isolated recording I/O. Current release measurements
 and their limits are in [validation](docs/validation.md#recording-isolation-and-remaining-review--november-1-2026).

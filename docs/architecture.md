@@ -194,3 +194,20 @@ refreshing every 30 seconds. Hardware/connector discovery is unchanged to preser
 next-sample disconnect/reconnect detection. Parked telemetry blocks on its action
 channel; attach/teardown sends an explicit visibility event, avoiding lost reopen
 wake-ups. A bounded-counter diagnostic exposes wake-ups without per-tick logging.
+
+
+## Async executor sizing
+
+The collector's Tokio executor has two workers, independent of logical CPU count.
+Sampling, diagnostics and response construction still use blocking workers;
+SQLite/config mutations retain their separate ordered writer and read admission
+stays bounded. The SNI thread drives a current-thread runtime continuously inside
+block_on, including while the native window is parked. It needs no additional
+CPU-sized scheduler pool. The control reply-drain runtime is also current-thread.
+
+The zbus blocking API owns a separate dependency-managed executor, which is not
+reconfigured here. Total OS thread count includes it, dedicated worker threads,
+and on-demand Tokio blocking workers. No process-wide TOKIO_WORKER_THREADS
+variable is set or passed to launched applications. Do not lower blocking-pool
+capacity without checking sampler progress under simultaneous large reads; async
+worker sizing is not a total concurrency cap.
