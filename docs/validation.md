@@ -420,3 +420,14 @@ in the release guide. Hosted checks are tracked in
 success is not exact-source release acceptance. No AUR submission, devtools
 clean-chroot acceptance, CachyOS inclusion, suspend/resume result or new gaming/
 collector-overhead measurement is claimed by this update pass.
+
+
+The first full portable hosted run passed backend/update/rollback/staged packaging
+and then exposed an X11-only missing `libxkbcommon-x11` runtime library at native
+window creation. A local private-bus X11 startup passed normally and reproduced
+the panic at xkbcommon-dl's X11 loader when only that library was withheld via a
+test-child-only dlopen shim. The explicit Arch/Ubuntu dependency declarations now
+include it; startup assertions include child status and bounded fixture-owned
+structured logs so hosted failures retain the panic location. This did not require
+changing production window lifecycle code. Final exact-source hosted results
+remain visible in Actions rather than inferred from the local reproduction.

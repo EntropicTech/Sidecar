@@ -11,7 +11,7 @@ license=('MIT')
 # Bundled SQLite is C; GCC object LTO is incompatible with Rust/LLVM linking.
 # Cargo retains its own thin Rust LTO.
 options=('!strip' '!lto' '!debug')
-depends=('libgcc' 'hicolor-icon-theme' 'glibc' 'dbus' 'systemd' 'libglvnd' 'libxkbcommon' 'wayland' 'libx11' 'libxcb' 'fontconfig')
+depends=('libgcc' 'hicolor-icon-theme' 'glibc' 'dbus' 'systemd' 'libglvnd' 'libxkbcommon' 'libxkbcommon-x11' 'wayland' 'libx11' 'libxcb' 'fontconfig')
 makedepends=('rust>=1.89' 'cargo' 'pkgconf' 'python')
 optdepends=('mangohud: game frame logging' 'lib32-mangohud: 32-bit game frame logging'
             'qt6-tools: KWin diagnostics through qdbus6' 'kscreen: current monitor settings'

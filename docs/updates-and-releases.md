@@ -66,7 +66,8 @@ its own thin Rust LTO. Rust dependencies are fetched in prepare with `--locked`;
 `--frozen` and a controlled target directory. Production does not enable the
 screenshot/failure-injection feature. The Arch CI job builds a real package as a
 non-root user in a fresh Arch container and fails on namcap errors.
-The icon-theme hierarchy and direct libgcc dependency are declared. Warnings for
+The icon-theme hierarchy, direct libgcc and dynamically loaded libxkbcommon-x11
+dependencies are declared. Warnings for
 runtime-loaded EGL/Wayland/X11/font libraries and D-Bus/systemd remain reviewed
 requirements even when ELF dependency scanning labels them unused; the ELF
 interpreter can also be reported as unused. This is useful isolation,

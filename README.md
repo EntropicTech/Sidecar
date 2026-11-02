@@ -33,7 +33,7 @@ launcher. Technical commands, D-Bus names, service names and XDG directories rem
 
 Install Rust/Cargo, coreutils (source/artifact hashing), and native development libraries using your normal package
 manager. On CachyOS/Arch the build packages are `base-devel rust cargo pkgconf
-wayland libxkbcommon libglvnd libx11 libxcb fontconfig python`. The current locked
+wayland libxkbcommon libxkbcommon-x11 libglvnd libx11 libxcb fontconfig python`. The current locked
 dependencies require Rust 1.89 or newer. MangoHud is optional.
 
 ```sh

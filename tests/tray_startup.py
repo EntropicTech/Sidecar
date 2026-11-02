@@ -16,7 +16,7 @@ def main():
    while time.monotonic()<deadline:
     s=status()
     if predicate(s):return s
-    assert child.poll() is None,Path(temporary+'/stderr').read_text()[-4000:]
+    assert child.poll() is None, (child.returncode, Path(temporary+'/stderr').read_text()[-4000:], [(p.name,p.read_text()[-6000:]) for p in Path(temporary+'/state/igpu-man/logs').glob('desktop*.jsonl')])
     time.sleep(.04)
    raise AssertionError(s)
   def host():

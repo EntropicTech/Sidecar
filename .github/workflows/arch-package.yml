@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install package build dependencies
         run: |
-          pacman -Syu --noconfirm rust cargo python dbus libglvnd libxkbcommon wayland libx11 libxcb fontconfig hicolor-icon-theme namcap desktop-file-utils git
+          pacman -Syu --noconfirm rust cargo python dbus libglvnd libxkbcommon libxkbcommon-x11 wayland libx11 libxcb fontconfig hicolor-icon-theme namcap desktop-file-utils git
           useradd --create-home builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
       - name: Build pinned source package as an unprivileged user
