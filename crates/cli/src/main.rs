@@ -260,6 +260,14 @@ fn run() -> Result<()> {
                     )
                 }) {
                     println!("{} [{}] · {:?} · graphics {:?}% · video {:?}% · {:.1}s observed / last 60s · {}", c.name, c.process.pid, c.management, c.graphics_percent, c.video_percent, c.observed_seconds, c.executable);
+                    println!(
+                        "  {} · {}",
+                        c.launch_path.kind.label(),
+                        c.launch_path.explanation
+                    );
+                    if !c.launch_path.matching_profiles.is_empty() {
+                        println!("  Available profiles: {} (use igpu-man launch PROFILE after closing the old instance normally)", c.launch_path.matching_profiles.join(", "));
+                    }
                 }
                 println!("DRM client engine times; not whole-device utilization or predicted gaming gains. Use --all for excluded, idle and inaccessible applications.");
             }

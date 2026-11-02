@@ -73,7 +73,16 @@ A process that forks and exits entirely between samples may be unobservable.
 Application snapshots additionally expose `launch_id` and `profile_name` when
 registered, including after a launcher exits while observed descendants remain.
 Candidates are derived from the bounded collector ring; querying does not collect
-additional process information. Unknown/stale metrics are excluded from averages,
+additional process information. Each candidate adds `launch_path`: `kind`,
+`registration` (PID/start identity), `registered_profile`, `matching_profiles`,
+and `explanation`. Kinds are `registered_profile`, `registered_trial`,
+`registered_command`, `unregistered`, `managed_elsewhere`, `infrastructure`,
+`unknown`. Older replies default to unknown. Registration is evidence of an
+explicit Sidecar launch, not of a particular desktop entry or successful GPU
+placement. Multiple matching saved targets leave `saved_target` unspecified
+unless registration establishes a target. Exclusions suppress profile suggestions.
+Capabilities advertise `launch_path_audit` and `cached_software_versions`.
+Unknown/stale metrics are excluded from averages,
 and observation coverage is explicit. Sampling gaps do not count as sustained work.
 
 Trials use an explicit CLI exec wrapper without saving a profile. Verification
@@ -115,7 +124,7 @@ two-second client deadline, independent of telemetry requests.
 | `Show` | `applications: bool` | boolean: queued; optionally selects Applications, requests attention/focus subject to compositor policy |
 | `Close` | none | boolean: queued; parks window when tray available; otherwise exits dashboard/tray |
 | `Quit` | none | boolean: queued; exits dashboard/tray |
-| `Status` | none | JSON string: `schema_version`, `pid`, `ready`, `quitting`, `visible`, `tray_resident`, `windows_created`, `view`, `updates`, `active_trial`, `tray_available`, `telemetry_monotonic_ns` |
+| `Status` | none | JSON string: `schema_version`, `pid`, `ready`, `quitting`, `visible`, `tray_resident`, `windows_created`, `view`, `updates`, `telemetry_wakeups`, `active_trial`, `tray_available`, `telemetry_monotonic_ns` |
 
 Control acknowledgments mean accepted, not that process exit is complete. The
 CLI's `--status` helper reports `{"running":false}` when the name is absent.
@@ -175,3 +184,10 @@ that reserved field is removed before strict domain decoding. It is never logged
 Read-only/live sampling remains available. `IGPU_MAN_UPDATE_TOKEN` is an internal
 validated service-start nonce for carrying the lease across restart; it expires
 within five minutes if the updater fails. Package installation never sets it.
+
+The dashboard `telemetry_wakeups` counter increments when its telemetry worker
+receives an event or visible-mode timeout. It remains stable while cold/parked
+without events; status probes do not wake that worker. Visibility transitions
+explicitly wake it for fresh polling on reopen. Software-version diagnostics
+are cached up to five minutes; executable/package-database identity changes are
+checked on the independent 30-second display-diagnostics cadence.

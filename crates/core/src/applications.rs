@@ -31,6 +31,105 @@ pub struct Candidate {
     pub score: f64,
     pub observed_gpus: Vec<String>,
     pub source: String,
+    #[serde(default)]
+    pub launch_path: LaunchPath,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchKind {
+    RegisteredProfile,
+    RegisteredTrial,
+    RegisteredCommand,
+    Unregistered,
+    ManagedElsewhere,
+    Infrastructure,
+    #[default]
+    Unknown,
+}
+impl LaunchKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RegisteredProfile => "Managed profile launch",
+            Self::RegisteredTrial => "Sidecar test launch",
+            Self::RegisteredCommand => "Sidecar command launch",
+            Self::Unregistered => "Unregistered launch",
+            Self::ManagedElsewhere => "Managed elsewhere",
+            Self::Infrastructure => "Desktop infrastructure",
+            Self::Unknown => "Launch origin unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchPath {
+    pub kind: LaunchKind,
+    pub registration: Option<ProcessId>,
+    pub registered_profile: Option<String>,
+    pub matching_profiles: Vec<String>,
+    pub explanation: String,
+}
+impl Default for LaunchPath {
+    fn default() -> Self {
+        Self {
+            kind: LaunchKind::Unknown,
+            registration: None,
+            registered_profile: None,
+            matching_profiles: vec![],
+            explanation: "Launch-origin evidence is unavailable from this collector.".into(),
+        }
+    }
+}
+
+/// Registration establishes a Sidecar launch, never a specific desktop shortcut
+/// or successful GPU placement. Unregistered does not establish a bypass.
+pub fn launch_path(app: &Application, config: &Config) -> LaunchPath {
+    let mut matching_profiles: Vec<_> = config
+        .profiles
+        .iter()
+        .filter(|p| {
+            (app.launch_id.is_some() && app.profile_name.as_ref() == Some(&p.name))
+                || (!app.executable.is_empty() && same_executable(&p.executable, &app.executable))
+        })
+        .map(|p| p.name.clone())
+        .collect();
+    matching_profiles.sort();
+    let (kind, explanation) = if config
+        .managed_elsewhere
+        .iter()
+        .any(|p| !app.executable.is_empty() && same_executable(p, &app.executable))
+    {
+        (LaunchKind::ManagedElsewhere, "This executable is managed by another workflow. Sidecar does not recommend changing its launch settings.")
+    } else if infrastructure(&app.executable) {
+        (LaunchKind::Infrastructure, "Desktop infrastructure is observed separately and is not an application-routing candidate.")
+    } else if app.launch_id.is_some() {
+        if app.profile_name.as_ref().is_some_and(|name| {
+            !name.starts_with("trial-") || config.profiles.iter().any(|p| &p.name == name)
+        }) {
+            (LaunchKind::RegisteredProfile, "This process group belongs to a registered Sidecar profile launch. GPU activity is verified separately; registration does not prove placement.")
+        } else if app.profile_name.is_some() {
+            (LaunchKind::RegisteredTrial, "This process group belongs to a registered unsaved Sidecar profile/test launch. Resume verification before Keep.")
+        } else {
+            (LaunchKind::RegisteredCommand, "This process group belongs to a registered Sidecar command launch, without a saved profile. GPU activity is verified separately.")
+        }
+    } else if app.executable.is_empty() {
+        (LaunchKind::Unknown, "Executable identity is unavailable and no Sidecar registration is present. The launch origin cannot be established.")
+    } else {
+        (LaunchKind::Unregistered, "No launch registration exists in this collector. This does not identify a menu, pinned shortcut or session restore, or prove a profile was bypassed: a collector restart can lose registrations. For a controlled test, close the app normally and launch a selected profile; existing instances may reuse their original GPU settings.")
+    };
+    if matches!(
+        kind,
+        LaunchKind::ManagedElsewhere | LaunchKind::Infrastructure
+    ) {
+        matching_profiles.clear();
+    }
+    LaunchPath {
+        kind,
+        registration: app.launch_id.clone(),
+        registered_profile: app.launch_id.as_ref().and(app.profile_name.clone()),
+        matching_profiles,
+        explanation: explanation.into(),
+    }
 }
 
 pub fn infrastructure(executable: &str) -> bool {
@@ -132,11 +231,29 @@ pub fn candidates<S: Borrow<Snapshot>>(
         let mean: [Option<f64>; 3] =
             std::array::from_fn(|i| (durations[i] > 0.0).then(|| weighted[i] / durations[i]));
         let score = mean.iter().flatten().sum::<f64>();
-        let saved_profile = config.profiles.iter().find(|p| {
-            app.profile_name.as_ref() == Some(&p.name)
-                || same_executable(&p.executable, &app.executable)
-        });
-        let profile = saved_profile.map(|p| p.name.clone());
+        let path = launch_path(app, config);
+        let registered = app
+            .launch_id
+            .as_ref()
+            .and(app.profile_name.as_ref())
+            .and_then(|name| config.profiles.iter().find(|p| &p.name == name));
+        let matching: Vec<_> = config
+            .profiles
+            .iter()
+            .filter(|p| path.matching_profiles.contains(&p.name))
+            .collect();
+        let profile = registered
+            .map(|p| p.name.clone())
+            .or_else(|| (matching.len() == 1).then(|| matching[0].name.clone()));
+        // Multiple saved targets are alternatives, not evidence of launch intent.
+        let saved_target = if app.launch_id.is_some() {
+            app.requested_gpu.clone()
+        } else {
+            matching
+                .first()
+                .filter(|first| matching.iter().all(|p| p.gpu == first.gpu))
+                .map(|p| p.gpu.clone())
+        };
         let management = if config
             .managed_elsewhere
             .iter()
@@ -145,7 +262,7 @@ pub fn candidates<S: Borrow<Snapshot>>(
             Management::ManagedElsewhere
         } else if infrastructure(&app.executable) {
             Management::Infrastructure
-        } else if profile.is_some() {
+        } else if registered.is_some() || !matching.is_empty() {
             Management::SavedProfile
         } else if score > 0.0 {
             Management::Candidate
@@ -161,9 +278,9 @@ pub fn candidates<S: Borrow<Snapshot>>(
         } else {
             Management::Unavailable
         };
-        result.push(Candidate { process: app.id.clone(), name: app.name.clone(), executable: app.executable.clone(), management, profile, saved_target: saved_profile.map(|p| p.gpu.clone()),
+        result.push(Candidate { process: app.id.clone(), name: app.name.clone(), executable: app.executable.clone(), management, profile, saved_target,
             graphics_percent: mean[0], video_percent: mean[1], other_percent: mean[2], observed_seconds, active_seconds, score,
-            observed_gpus: app.observed_gpus.clone(), source: "Accessible DRM clients via /proc/fdinfo; time-weighted last 60 seconds. Engine times are not whole-device GPU shares or predicted FPS gains.".into() });
+            observed_gpus: app.observed_gpus.clone(), launch_path: path, source: "Accessible DRM clients via /proc/fdinfo; time-weighted last 60 seconds. Engine times are not whole-device GPU shares or predicted FPS gains.".into() });
     }
     result.sort_by(|a, b| {
         let rank = |c: &Candidate| {
@@ -337,6 +454,68 @@ pub fn verify_trial<S: Borrow<Snapshot>>(
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+    #[test]
+    fn launch_audit_separates_registration_matching_profiles_and_external_management() {
+        let mut snapshot = sample(1, 10, 20, "dgpu", 5.);
+        let mut config = Config::default();
+        for (name, gpu) in [("app-dgpu", "dgpu"), ("app-igpu", "igpu")] {
+            config.profiles.push(Profile {
+                name: name.into(),
+                executable: "/tmp/app".into(),
+                gpu: gpu.into(),
+                ..Default::default()
+            });
+        }
+        let app = &mut snapshot.applications[0];
+        app.launch_id = None;
+        let path = launch_path(app, &config);
+        assert_eq!(path.kind, LaunchKind::Unregistered);
+        assert_eq!(path.matching_profiles, ["app-dgpu", "app-igpu"]);
+        let candidate = &candidates(&snapshot, &VecDeque::<Snapshot>::new(), &config)[0];
+        assert!(candidate.saved_target.is_none());
+        assert!(candidate.profile.is_none());
+        assert_eq!(candidate.management, Management::SavedProfile);
+        let app = &mut snapshot.applications[0];
+        app.launch_id = Some(ProcessId {
+            pid: 9,
+            start_ticks: 19,
+        }); // registered wrapper exited
+        app.profile_name = Some("app-igpu".into());
+        app.requested_gpu = Some("igpu".into());
+        let path = launch_path(app, &config);
+        assert_eq!(path.kind, LaunchKind::RegisteredProfile);
+        assert_eq!(path.registration.as_ref().unwrap().pid, 9);
+        let candidate = &candidates(&snapshot, &VecDeque::<Snapshot>::new(), &config)[0];
+        assert_eq!(candidate.profile.as_deref(), Some("app-igpu"));
+        assert_eq!(candidate.saved_target.as_deref(), Some("igpu"));
+        let app = &mut snapshot.applications[0];
+        app.profile_name = Some("trial-test".into());
+        assert_eq!(launch_path(app, &config).kind, LaunchKind::RegisteredTrial);
+        app.profile_name = None;
+        assert_eq!(
+            launch_path(app, &config).kind,
+            LaunchKind::RegisteredCommand
+        );
+        config.managed_elsewhere.insert(app.executable.clone());
+        let path = launch_path(app, &config);
+        assert_eq!(path.kind, LaunchKind::ManagedElsewhere);
+        assert!(path.matching_profiles.is_empty());
+        app.launch_id = None;
+        app.executable.clear();
+        assert_eq!(launch_path(app, &config).kind, LaunchKind::Unknown);
+        app.executable = "/usr/bin/kwin_wayland".into();
+        assert_eq!(launch_path(app, &config).kind, LaunchKind::Infrastructure);
+    }
+    #[test]
+    fn older_candidate_responses_have_unknown_launch_evidence() {
+        let snapshot = sample(1, 10, 20, "dgpu", 0.);
+        let candidate =
+            candidates(&snapshot, &VecDeque::<Snapshot>::new(), &Config::default()).remove(0);
+        let mut value = serde_json::to_value(candidate).unwrap();
+        value.as_object_mut().unwrap().remove("launch_path");
+        let loaded: Candidate = serde_json::from_value(value).unwrap();
+        assert_eq!(loaded.launch_path.kind, LaunchKind::Unknown);
+    }
     fn sample(time: u64, pid: u32, start: u64, pci: &str, value: f64) -> Snapshot {
         let id = ProcessId {
             pid,

@@ -90,7 +90,7 @@ require sustained identity-bound evidence. Chart auto-scale changes only axes.
 The dashboard is reconstructible UI state. Saved profiles and recordings survive
 its exit. The collector owns running trial specifications; Applications can resume
 them with fresh verification, without automatically saving. Unlaunched editor
-drafts remain ephemeral. A collector restart loses live launch registrations and trial evidence;
+drafts remain ephemeral. An uncoordinated collector restart loses live launch registrations and trial evidence;
 never fabricate a resumed verification result after that restart.
 
 ## Operational interfaces
@@ -174,3 +174,23 @@ including requests queued before lease acquisition. A runtime unit override carr
 the nonce through restart. Only matching-token launch restoration is admitted.
 Atomic file transactions and private SQLite/config backups support rollback and
 interrupted recovery; data is never replaced automatically during program rollback.
+
+
+## Launch audit and idle work
+
+Candidate launch-path projections reuse existing registration/descendant and
+executable identities; they introduce no scanner, process-environment collection,
+telemetry history or persistent tracking. Saved-profile matches are alternatives,
+not launch-origin evidence. Actual registered intent takes precedence over other
+profiles for that executable; ambiguous unregistered targets remain unspecified.
+An unregistered launch cannot identify a shortcut/session restore or establish a
+bypass after collector restart. Managed elsewhere suppresses routing suggestions.
+
+The diagnostics worker owns a software-version cache outside the sampler lock.
+Resolved executable metadata (device/inode/size/mtime) and the Arch package-database
+directory invalidate it on the next 30-second check; a five-minute expiry covers
+unobserved changes, including missing optional tools. Display/KWin queries keep
+refreshing every 30 seconds. Hardware/connector discovery is unchanged to preserve
+next-sample disconnect/reconnect detection. Parked telemetry blocks on its action
+channel; attach/teardown sends an explicit visibility event, avoiding lost reopen
+wake-ups. A bounded-counter diagnostic exposes wake-ups without per-tick logging.

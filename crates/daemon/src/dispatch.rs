@@ -3,7 +3,7 @@ use super::*;
 impl Service {
     pub async fn dispatch(&self, operation: Operation, value: Value) -> Result<String> {
         if operation == Operation::Capabilities {
-            return Ok(json!({"api_version":igpu_core::API_VERSION,"build":igpu_core::build::metadata(),"features":["guarded_stop","request_ids","pending_trials","structured_logging","isolated_recording_io","compact_recording_timeline","coordinated_updates"]}).to_string());
+            return Ok(json!({"api_version":igpu_core::API_VERSION,"build":igpu_core::build::metadata(),"features":["guarded_stop","request_ids","pending_trials","structured_logging","isolated_recording_io","compact_recording_timeline","coordinated_updates","launch_path_audit","cached_software_versions"]}).to_string());
         }
         if operation.live() {
             let view = self

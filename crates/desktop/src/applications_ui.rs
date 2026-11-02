@@ -1,6 +1,6 @@
 use super::*;
 use igpu_core::{
-    applications::{Candidate, Management, Placement, Verification},
+    applications::{Candidate, LaunchKind, Management, Placement, Verification},
     launchers::{self, InstalledLauncher},
 };
 use std::{
@@ -391,14 +391,40 @@ impl Dashboard {
             for title in ["Application / placement", "dGPU graphics", "dGPU video", "dGPU observation", "Actions"] { ui.strong(title); } ui.end_row();
             for candidate in visible {
                     ui.vertical(|ui| {
+                        ui.set_max_width(360.0);
                         ui.strong(&candidate.name).on_hover_text(&candidate.executable);
                         let igpu = snapshot.gpus.iter().any(|g| g.integrated && candidate.observed_gpus.contains(&g.pci));
                         let dgpu = snapshot.gpus.iter().any(|g| !g.integrated && candidate.observed_gpus.contains(&g.pci));
                         let placement = match (igpu,dgpu) { (true,true) => "Both GPUs active", (true,false) => "iGPU active", (false,true) => "dGPU active", _ => "No current measured activity" };
-                        let mismatch = candidate.saved_target.as_ref().is_some_and(|gpu| candidate.observed_gpus.iter().any(|p| p != gpu));
+                        let mismatch = candidate.saved_target.as_ref().and_then(|gpu| launch::resolve_gpu(&snapshot.gpus, gpu).ok()).is_some_and(|gpu| candidate.observed_gpus.iter().any(|p| p != &gpu.pci));
                         let color = if mismatch || (igpu && dgpu) { theme::WARNING } else if igpu { theme::IGPU } else if dgpu { theme::DGPU } else { theme::MUTED };
-                        theme::badge(ui, if mismatch { "Placement mismatch" } else { placement }, color);
+                        theme::badge(ui, if mismatch { if candidate.launch_path.registration.is_some() { "Placement mismatch" } else { "Activity differs from profile" } } else { placement }, color);
                         if let Some(profile) = &candidate.profile { ui.small(format!("Saved: {profile}")); }
+                        let path = &candidate.launch_path;
+                        let color = if path.kind == LaunchKind::Unregistered && !path.matching_profiles.is_empty() { theme::WARNING } else { theme::MUTED };
+                        ui.label(egui::RichText::new(path.kind.label()).color(color)).on_hover_text(&path.explanation);
+                        egui::CollapsingHeader::new("Launch path / next launch")
+                            .id_salt((candidate.process.pid, candidate.process.start_ticks))
+                            .default_open(cfg!(feature = "screenshot") && std::env::var("IGPU_MAN_SCREENSHOT_WORKFLOW").as_deref() == Ok("audit") && !path.matching_profiles.is_empty())
+                            .show(ui, |ui| {
+                            ui.label(&path.explanation);
+                            if let Some(profile) = &path.registered_profile { ui.label(format!("Registered settings: {profile}")); }
+                            if let Some(id) = &path.registration { ui.small(format!("Registered root: PID {} · start {} (descendants retain attribution)", id.pid, id.start_ticks)); }
+                            if !path.matching_profiles.is_empty() {
+                                ui.label("Available profiles (choose the intended target):");
+                                for name in &path.matching_profiles {
+                                    let command = format!("igpu-man launch '{}'", name.replace('\'', "'\\''"));
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.monospace(&command);
+                                        if ui.small_button("Copy").clicked() { ui.ctx().copy_text(command); }
+                                    });
+                                }
+                                ui.small("Close the old instance normally before relaunching. Use the separate Sidecar launcher if created, and pin that entry for future launches. No running app is moved or terminated.");
+                            } else if path.kind == LaunchKind::Unregistered {
+                                ui.small("No exact executable match. A profile may start a wrapper; choose the intended profile manually in Profiles.");
+                            }
+                            if ui.button("Open Profiles").clicked() { self.tab = 2; }
+                        });
                     });
                     ui.label(egui::RichText::new(percent(candidate.graphics_percent)).monospace().strong().color(if candidate.graphics_percent.is_some_and(|v| v > 0.0) { theme::DGPU } else { theme::MUTED })).on_hover_text(&candidate.source);
                     ui.label(egui::RichText::new(percent(candidate.video_percent)).monospace().strong().color(if candidate.video_percent.is_some_and(|v| v > 0.0) { theme::DGPU } else { theme::MUTED })).on_hover_text("Video includes decode/encode engine activity where exposed; it is not proof that a particular stream uses hardware decoding.");

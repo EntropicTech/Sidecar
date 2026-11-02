@@ -431,3 +431,60 @@ include it; startup assertions include child status and bounded fixture-owned
 structured logs so hosted failures retain the panic location. This did not require
 changing production window lifecycle code. Final exact-source hosted results
 remain visible in Actions rather than inferred from the local reproduction.
+
+
+## Launch-path audit and background work — November 1, 2026
+
+`make check` and `make test` passed (53 Rust tests plus native arguments,
+integration, update lease and large-recording responsiveness). Fixtures cover
+registered profiles/trials/commands, unregistered and inaccessible identities,
+exclusions, multiple saved targets, actual registered intent taking precedence,
+older candidate responses, and retained wrapper attribution versus PID reuse.
+Version-cache tests count probes across unchanged identities, expiry, and missing/
+installed/replaced tools. Private native startup tests assert stable telemetry
+wake-up counters for cold and warm tray parking, then successful reopen. Six
+tray cycles/rapid reopen/watcher recovery, eleven lifecycle cases, both worker
+failures/poison and a captured/inspected Applications audit view passed. No user
+browser or other workload was restarted; visual capture used a temporary profile.
+
+With two readers over a synthetic 127.98 MiB recording, the native live check
+observed 22 snapshot requests, no errors, maximum request latency 0.031 seconds,
+Stop during export 0.019 seconds, and three distinct dashboard telemetry updates.
+These include CLI overhead and do not establish real-time guarantees.
+
+Short sequential 30-second before/after observations varied: normal collector plus
+reaped helpers was 0.70% before and 0.83–0.93% after; recording 2.13% before and
+2.20–2.27% after; open-dashboard collector 1.00% before and 0.77–1.10% after.
+Dashboard CPU was 0.20% before and 0.20–0.23% after. Those uncontrolled samples
+cannot establish an overall CPU win or attribute their variation to code changes.
+
+A longer concurrent pair (separate private buses/XDG trees, five-second warm-up,
+120 seconds each, old and new release binaries, no windows/recording) measured:
+
+| Collector | Own CPU | CPU including reaped helpers | Resident RAM |
+| --- | ---: | ---: | ---: |
+| Before | 0.83% | 1.16% | 61.5 MiB |
+| After | 0.83% | 0.90% | 61.3 MiB |
+
+One core is 100%. The helper-inclusive difference was about 0.26 percentage points;
+the collector's own CPU was unchanged at this resolution. Both observed 19 DRM
+clients initially, with 207/217 inspected processes during staggered startup.
+Two concurrent observers, changing desktop workloads and a single pair limit
+interpretation; this is not a run-to-run distribution or game-frametime result.
+The optimized normal collector met the sub-1% target in this observation.
+Version probes avoid repeated subprocesses; GPU/process sampling rates and live
+hardware/connector discovery remain unchanged. Cold/parked wake-up assertions
+establish event-driven telemetry, not universal zero CPU or reclaimed-RAM claims.
+
+Raw [background/audit measurements](measurements/launch-audit-background.json).
+Reproduce modes with `tests/measure_runtime.py`; for a longer collector-only run:
+
+```sh
+dbus-run-session -- python3 tests/measure_runtime.py /tmp/background.json --collector-only --seconds 120 --warmup 5
+# IGPU_MAN_BIN_DIR can select a preserved before build; independent private buses
+# can run a pair concurrently. Do not use the real service as test cleanup.
+```
+
+Installation/update checks retain the existing coordinated updater safety gates.
+Native suspend/resume, physical monitor reconnect and gaming benefit are not
+claimed by this pass. Hosted exact-source outcomes are recorded in Actions.

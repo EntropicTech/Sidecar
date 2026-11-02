@@ -164,3 +164,11 @@ Rollback restores installed programs; incompatible data migrations require expli
 review. Public packages use pinned sources, frozen dependency builds, current
 SRCINFO, reviewed metadata and isolated package checks. Never equate configured CI
 or a local successful build with repository acceptance or hosted CI success.
+
+
+Launch-origin explanations require registration evidence. Executable/profile
+matches alone must not imply a desktop shortcut, a bypass, or successful routing.
+Reuse existing accounting and respect exclusions. Cache static diagnostic probes
+outside sampling; preserve explicit freshness limits and missing-tool recovery.
+Parked telemetry must block on events and be explicitly woken when visibility
+changes. Test cold start, repeated park/reopen and quiet wake-up counters.

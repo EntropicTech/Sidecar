@@ -5,12 +5,12 @@ Build release binaries first, then:
 dbus-run-session -- python3 tests/measure_runtime.py /tmp/igpu-man-runtime.json
 Opens the dashboard briefly; no games, browser restarts, or system tuning.
 """
+import argparse
 import json
 import hashlib
 import os
 from pathlib import Path
 import subprocess
-import sys
 import tempfile
 import time
 
@@ -29,11 +29,25 @@ def usage(pid):
 
 
 def main():
-    workflow = "--workflow" in sys.argv
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("output", type=Path)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--workflow", action="store_true")
+    modes.add_argument("--collector-only", action="store_true")
+    parser.add_argument("--seconds", type=float, default=30)
+    parser.add_argument("--warmup", type=float, default=0)
+    args = parser.parse_args()
+    if not 10 <= args.seconds <= 300 or not 0 <= args.warmup <= 60:
+        parser.error("Use 10–300 measurement seconds and 0–60 warm-up seconds")
+    workflow = args.workflow
     results = {"seconds_per_mode": 30, "limitations": "Three sequential idle-desktop modes in one collector instance, one run each; later RSS includes earlier ring-buffer/recording allocations. Not a gaming comparison. CPU percentages use one core. Child CPU includes only reaped children. Private bus has no tray watcher; dashboard tests fallback window mode.", "modes": []}
+    results["seconds_per_mode"] = args.seconds
+    results["warmup_seconds"] = args.warmup
+    if args.collector_only:
+        results["limitations"] = "One collector-only observation on the current desktop workload; no recording/window. CPU uses one core and includes only reaped helper children. Tick quantization depends on duration; not a gaming result. Concurrent observers and changing process/GPU workload can affect readings."
     results["artifacts_sha256"]={name:hashlib.sha256((BIN/name).read_bytes()).hexdigest() for name in ["igpu-mand","igpu-man-desktop","igpu-man"]}
     if workflow:
-        results["limitations"] = "Two sequential 30-second observations, collector-only then Applications view with live candidate queries. One run per mode on the current desktop workload; not a gaming comparison. CPU percentages use one core. Private bus has no tray watcher; temporary XDG settings, no managed trials. Later RSS includes the earlier ring buffer. CPU tick quantization is approximately 0.033 percentage points."
+        results["limitations"] = "Two sequential observations, collector-only then Applications view with live candidate queries. One run per mode on the current desktop workload; not a gaming comparison. CPU percentages use one core. Private bus has no tray watcher; temporary XDG settings, no managed trials. Later RSS includes the earlier ring buffer. CPU tick quantization depends on the selected duration."
     with tempfile.TemporaryDirectory(prefix="igpu-man-measure-") as temporary:
         root = Path(temporary)
         environment = dict(os.environ, XDG_STATE_HOME=str(root / "state"), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"))
@@ -46,7 +60,7 @@ def main():
         def measure(mode, processes):
             before = {name: usage(process.pid) for name, process in processes.items()}
             started = time.monotonic()
-            time.sleep(30)
+            time.sleep(args.seconds)
             elapsed = time.monotonic() - started
             output = {"mode": mode, "seconds": elapsed, "processes": {}}
             for name, process in processes.items():
@@ -74,7 +88,11 @@ def main():
                 raise AssertionError("Collector unavailable")
             results["gpus"] = [{"pci": g["pci"], "name": g["name"]} for g in snapshot["gpus"]]
             results["coverage"] = snapshot["coverage"]
+            time.sleep(args.warmup)
             measure("collector-only", {"collector": daemon})
+            if args.collector_only:
+                args.output.write_text(json.dumps(results, indent=2) + "\n")
+                return
             if not workflow:
                 cli("record", "start", "overhead-measurement")
                 measure("recording-250ms", {"collector": daemon})
@@ -86,7 +104,7 @@ def main():
             if desktop and desktop.poll() is None:
                 desktop.terminate(); desktop.wait(timeout=10)
             daemon.terminate(); daemon.wait(timeout=10)
-    Path(sys.argv[1]).write_text(json.dumps(results, indent=2) + "\n")
+    args.output.write_text(json.dumps(results, indent=2) + "\n")
 
 
 if __name__ == "__main__":

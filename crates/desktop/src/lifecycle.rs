@@ -20,6 +20,7 @@ struct State {
     visible: bool,
     view: usize,
     updates: u64,
+    telemetry_wakeups: u64,
     windows_created: u64,
     active_trial: bool,
     tray: bool,
@@ -141,6 +142,11 @@ impl Control {
             state.updates += 1;
         }
     }
+    pub fn telemetry_woke(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.telemetry_wakeups += 1;
+        }
+    }
     pub fn selected_view(&self, view: usize) {
         if let Ok(mut state) = self.state.lock() {
             state.view = view;
@@ -162,7 +168,7 @@ impl Control {
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("GUI lifecycle lock poisoned".into()))?;
         Ok(json!({"schema_version":1,"source_sha256":igpu_core::build::SOURCE_ID,"pid":std::process::id(),"ready":state.ready,"quitting":state.quitting,
-            "windows_created":state.windows_created,"visible":state.visible,"view":state.view,"tray_resident":state.ready&&!state.visible&&!state.quitting&&state.tray,"updates":state.updates,"active_trial":state.active_trial,"tray_available":state.tray,"telemetry_monotonic_ns":state.telemetry_ns,"worker_health":state.worker_health}).to_string())
+            "windows_created":state.windows_created,"visible":state.visible,"view":state.view,"tray_resident":state.ready&&!state.visible&&!state.quitting&&state.tray,"updates":state.updates,"telemetry_wakeups":state.telemetry_wakeups,"active_trial":state.active_trial,"tray_available":state.tray,"telemetry_monotonic_ns":state.telemetry_ns,"worker_health":state.worker_health}).to_string())
     }
 }
 

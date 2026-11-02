@@ -34,6 +34,8 @@ def main():
    assert s['windows_created']==0 and s['updates']==0
    for _ in range(3):gui('--tray')
    time.sleep(.3);s=status();assert s['pid']==child.pid and s['windows_created']==0 and not s['visible']
+   before=status()['telemetry_wakeups'];time.sleep(1.3)
+   assert status()['telemetry_wakeups']==before,'Cold tray telemetry worker woke without an event'
    quit();watcher.terminate();watcher.wait(timeout=3);watcher=None
    child=start();s=wait(lambda s:s.get('ready'))
    assert s['windows_created']==0 and not s['visible']
@@ -42,6 +44,9 @@ def main():
    gui();s=wait(lambda s:s.get('visible') and s.get('windows_created')==1)
    gui('--tray');time.sleep(.3);s=status();assert s['visible'] and s['windows_created']==1
    gui('--close');wait(lambda s:s.get('tray_resident'));gui('--tray');assert status()['windows_created']==1
+   time.sleep(.2);before=status()['telemetry_wakeups'];time.sleep(1.3)
+   assert status()['telemetry_wakeups']==before,'Parked telemetry worker woke without an event'
+   gui();wait(lambda s:s.get('visible') and s.get('windows_created')==2)
    quit();watcher.terminate();watcher.wait(timeout=3);watcher=None
    child=start();s=wait(lambda s:s.get('visible'),seconds=20)
    assert s['windows_created']==1 and not s['tray_available']

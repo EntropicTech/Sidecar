@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Application launch-path explanations, matching-profile actions and honest
+  unknown/unregistered states without extra process scanning.
+- Cached software-version probes and event-driven parked dashboard telemetry.
+
 - Coordinated developer updates with recording exclusion, private data backups,
   atomic installed-file replacement, rollback and interrupted-update recovery.
 - Checksummed source releases and Arch package metadata for the Sidecar upstream.

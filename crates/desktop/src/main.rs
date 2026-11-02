@@ -34,6 +34,7 @@ enum Action {
     RefreshLaunchers,
     TrialKept,
     TrayChanged,
+    VisibilityChanged,
     StartTrial {
         profile: Box<Profile>,
         previous: Vec<ProcessId>,
@@ -293,7 +294,18 @@ impl Dashboard {
             let mut refreshed = Instant::now() - Duration::from_secs(10);
             let mut launchers_loaded = false;
             loop {
-                match receiver.recv_timeout(Duration::from_secs(1)) {
+                // Parked workers have no periodic timer. The native window
+                // owner sends a visibility event on both attach and teardown.
+                let event = if worker_visible.load(std::sync::atomic::Ordering::Acquire) {
+                    receiver.recv_timeout(Duration::from_secs(1))
+                } else {
+                    receiver
+                        .recv()
+                        .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+                };
+                context.telemetry_woke();
+                match event {
+                    Ok(Action::VisibilityChanged) => {}
                     Ok(Action::Rpc(method, value)) => {
                         let result = client::call::<Value>(method, &value);
 

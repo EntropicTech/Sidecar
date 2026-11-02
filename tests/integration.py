@@ -58,7 +58,7 @@ def main():
             cli("manage", "/tmp/workflow-owned-emulator", "--elsewhere")
             assert "managed_elsewhere" in (root / "config/igpu-man/config.toml").read_text()
             candidates = json.loads(cli("candidates", "--json").stdout)
-            assert all("observed_seconds" in c and "management" in c for c in candidates)
+            assert all("observed_seconds" in c and "management" in c and "launch_path" in c for c in candidates)
             schedule = json.loads(cli("experiment").stdout)
             assert len(schedule) == 9
             first = json.loads(cli("record", "start", "browser-idle").stdout)

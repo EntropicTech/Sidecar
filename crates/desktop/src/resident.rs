@@ -18,6 +18,7 @@ impl eframe::App for WindowSession {
             dashboard
                 .visible_flag
                 .store(false, std::sync::atomic::Ordering::Release);
+            let _ = dashboard.sender.send(Action::VisibilityChanged);
             dashboard.control.parked();
             match self.parked.lock() {
                 Ok(mut slot) => *slot = Some(dashboard),
@@ -81,6 +82,7 @@ pub fn run(
                     igpu_core::logging::event("info", "dashboard.window_reopened", json!({}));
                     dashboard
                 };
+                let _ = dashboard.sender.send(Action::VisibilityChanged);
                 Ok(Box::new(WindowSession {
                     dashboard: Some(dashboard),
                     parked: slot,

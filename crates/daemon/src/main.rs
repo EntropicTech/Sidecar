@@ -811,7 +811,8 @@ async fn run() -> Result<()> {
         config.storage_limit_mb,
     )?;
     let (config, recovery_warnings) = launch::recover_pending_launchers(&config, &paths);
-    let mut collector = Collector::default();
+    let mut diagnostics_cache = collector::DiagnosticsCache::default();
+    let mut collector = Collector::new("/sys", "/proc", diagnostics_cache.collect());
     let snapshot = Arc::new(collector.sample(&config));
     let live = Arc::new(Mutex::new(live::Live {
         collector,
@@ -921,13 +922,13 @@ async fn run() -> Result<()> {
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
             let live = diagnostic_live.clone();
-            tokio::task::spawn_blocking(move || -> Result<()> {
-                let diagnostics = collector::diagnostics();
+            diagnostics_cache = tokio::task::spawn_blocking(move || -> Result<_> {
+                let diagnostics = diagnostics_cache.collect();
                 live.lock()
                     .map_err(|_| anyhow::anyhow!("Live state poisoned"))?
                     .collector
                     .diagnostics = diagnostics;
-                Ok(())
+                Ok(diagnostics_cache)
             })
             .await
             .map_err(|e| task_failure(e, "Diagnostics"))??;

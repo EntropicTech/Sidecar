@@ -46,12 +46,18 @@ cargo build --workspace --release --locked
 ```
 
 The collector runs without root. No GPU settings are changed by monitoring.
+Software-version probes are cached for five minutes and invalidated when the
+resolved executable or Arch package-database metadata changes (checked every 30
+seconds). KWin/display diagnostics retain their separate 30-second refresh; GPU
+sensors and hardware/connector discovery keep their normal sampling cadence.
+
 Low overhead is a project requirement: one-second normal sampling, bounded shared
 history, sleeping workers, and isolated recording I/O. Current release measurements
 and their limits are in [validation](docs/validation.md#recording-isolation-and-remaining-review--november-1-2026).
 Closing the window keeps **Sidecar in the system tray**. Click the icon or choose
 **Open dashboard** to reopen it. Charts and dashboard polling stop while closed;
-the selected view and drafts are preserved. **Quit Sidecar** exits the dashboard
+the selected view and drafts are preserved. The parked telemetry worker blocks
+on events; it has no periodic wake-up timer. **Quit Sidecar** exits the dashboard
 and tray; the collector, recordings and launched applications continue independently.
 If no system tray is available, closing exits the dashboard. Relaunching reuses
 an existing resident instance.
@@ -147,6 +153,19 @@ client busy time, not additive whole-device utilization or predicted FPS gains.
    Plasma launcher. Pin that launcher for future launches. Existing launchers and
    profile names are preserved. **Discard setup** leaves the test app running.
 
+Each application now shows its **launch path** separately from observed GPU
+activity. Expand **Launch path / next launch** for registered profile, test or
+command evidence, available profiles, copyable launch commands and an **Open
+Profiles** shortcut. Registration follows observed descendants using PID/start
+identity even after a launcher exits. Multiple matching profiles remain explicit
+alternatives; Sidecar does not guess your intended GPU.
+
+**Unregistered launch** means this collector has no registration, not that a
+particular pinned shortcut, menu entry or session restore bypassed a profile.
+Manual collector restarts can lose registrations. Close an existing instance
+normally before using a selected profile; single-instance applications can reuse
+old GPU settings. Original launchers and other workflows are preserved.
+
 Choose **Managed elsewhere** for applications configured by another workflow.
 The exclusion is saved by executable identity and survives application/collector
 restarts. **Undo** is available in the Managed elsewhere section, including when
@@ -181,8 +200,9 @@ verification; use the dashboard trial flow for verified Keep.
 If the dashboard exits during a trial, reopen Applications and choose **Resume
 verification** for its unkept launch. The collector retains the explicit settings
 while the app/observed descendants remain alive. Resume fetches fresh evidence;
-it never saves automatically. Unsaved editor changes are temporary. Restarting
-the collector loses live trial registrations, so Keep or discard before an upgrade.
+it never saves automatically. Unsaved editor changes are temporary. An uncoordinated collector restart loses live trial registrations. The coordinated
+updater restores surviving launch identities, but verification evidence must be
+gathered fresh after any collector restart.
 [Recovery preview](docs/images/trial-recovery.png).
 
 ## Application profiles

@@ -202,3 +202,21 @@ not an old user database over newer data. A stopped service can be recovered;
 active recording prevents recovery. A five-minute lease expires if no updater
 survives. A temporary runtime unit override may remain after an interrupted update;
 recovery removes it. See [updates/releases](updates-and-releases.md).
+
+
+## Launch-path explanations and cached diagnostics
+
+In Applications, expand **Launch path / next launch**, or inspect
+`igpu-man candidates --json` → `launch_path`. A profile existing for an executable
+does not establish how the running process started. **Unregistered** can follow a
+manual collector restart; **unknown** can mean inaccessible executable identity.
+Use a chosen profile for the next fresh launch, and inspect actual engine evidence
+separately. Firefox's already-running check still refuses a fresh test without
+terminating the existing browser. Managed elsewhere is respected.
+
+Version information can be cached for five minutes; changed executable or Arch
+package-database metadata triggers probes on the next 30-second diagnostic pass.
+Display/KWin information retains its 30-second refresh. In dashboard `--status`,
+`telemetry_wakeups` stays constant in a quiet tray; it advances on reopening or
+explicit events. A status probe alone must not wake telemetry. Higher RAM after
+opening a dashboard can reflect retained Rust/model/allocator state.

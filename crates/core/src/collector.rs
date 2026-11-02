@@ -624,7 +624,7 @@ pub fn command_output(program: &str, args: &[&str]) -> Option<String> {
     result.map(|s| s.chars().take(65536).collect())
 }
 
-pub fn diagnostics() -> Diagnostics {
+fn software_versions() -> BTreeMap<String, String> {
     let mut versions = BTreeMap::new();
     for (key, program, args) in [
         ("kernel", "uname", vec!["-r"]),
@@ -641,13 +641,73 @@ pub fn diagnostics() -> Diagnostics {
                 .into(),
         );
     }
+    versions
+}
+
+type FileIdentity = Option<(u64, u64, u64, i64, i64)>;
+fn version_identity() -> Vec<FileIdentity> {
+    use std::os::unix::fs::MetadataExt;
+    let search = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths: Vec<_> = ["uname", "kwin_wayland", "firefox", "mangohud", "pacman"]
+        .into_iter()
+        .map(|program| {
+            std::env::split_paths(&search)
+                .map(|directory| directory.join(program))
+                .find(|path| path.is_file())
+        })
+        .collect();
+    paths.push(Some(PathBuf::from("/var/lib/pacman/local")));
+    paths
+        .into_iter()
+        .map(|path| {
+            path.and_then(|p| fs::metadata(p).ok())
+                .map(|m| (m.dev(), m.ino(), m.len(), m.mtime(), m.mtime_nsec()))
+        })
+        .collect()
+}
+
+/// Only the slow diagnostics worker owns this cache; never the sampler lock.
+#[derive(Default)]
+pub struct DiagnosticsCache {
+    last: Option<(Instant, Vec<FileIdentity>, BTreeMap<String, String>)>,
+}
+impl DiagnosticsCache {
+    fn versions(
+        &mut self,
+        now: Instant,
+        identity: Vec<FileIdentity>,
+        probe: impl FnOnce() -> BTreeMap<String, String>,
+    ) -> BTreeMap<String, String> {
+        if let Some((checked, previous, versions)) = &self.last {
+            if *previous == identity
+                && now.saturating_duration_since(*checked) < Duration::from_secs(300)
+            {
+                return versions.clone();
+            }
+        }
+        let versions = probe();
+        self.last = Some((now, identity, versions.clone()));
+        versions
+    }
+    pub fn collect(&mut self) -> Diagnostics {
+        let versions = self.versions(Instant::now(), version_identity(), software_versions);
+        display_diagnostics(versions)
+    }
+}
+
+pub fn diagnostics() -> Diagnostics {
+    DiagnosticsCache::default().collect()
+}
+
+fn display_diagnostics(versions: BTreeMap<String, String>) -> Diagnostics {
     let kwin_support = command_output("qdbus6", &["org.kde.KWin", "/KWin", "supportInformation"]);
     let display_configuration =
         command_output("kscreen-doctor", &["-j"]).and_then(|s| serde_json::from_str(&s).ok());
     let mut notes = vec!["Process coverage includes accessible processes owned by this user only; shared DRM clients are counted once. Client memory is not additive physical GPU usage.".into(),
         "GPU descriptors are rediscovered every 5 seconds for existing processes; known clients follow the current sampling interval. New processes are discovered each tick.".into(),
         "Integrated-GPU classification is inferred from VRAM size; use explicit PCI aliases if incorrect.".into(),
-        "GPU power sensors may omit system/CPU power; do not interpret their sum as wall power.".into()];
+        "GPU power sensors may omit system/CPU power; do not interpret their sum as wall power.".into(),
+        "Software versions refresh on startup, executable/package database identity changes, or after five minutes; display/KWin diagnostics refresh every 30 seconds.".into()];
     if kwin_support.is_none() {
         notes.push(
             "KWin support information unavailable (qdbus6 or Plasma session missing).".into(),
@@ -691,6 +751,33 @@ fn apply_display_configuration(gpus: &mut [Gpu], configuration: Option<&serde_js
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn version_probes_are_cached_until_identity_changes_or_expiry_including_missing_tools() {
+        use super::*;
+        let now = Instant::now();
+        let mut cache = DiagnosticsCache::default();
+        let calls = std::cell::Cell::new(0);
+        let probe = || {
+            calls.set(calls.get() + 1);
+            BTreeMap::from([("optional".into(), "unavailable".into())])
+        };
+        cache.versions(now, vec![None], probe);
+        for seconds in [30, 60, 299] {
+            cache.versions(now + Duration::from_secs(seconds), vec![None], probe);
+        }
+        assert_eq!(calls.get(), 1);
+        cache.versions(now + Duration::from_secs(300), vec![None], probe);
+        assert_eq!(calls.get(), 2);
+        let installed = Some((1, 2, 3, 4, 5));
+        cache.versions(now + Duration::from_secs(301), vec![installed], probe);
+        assert_eq!(calls.get(), 3);
+        cache.versions(
+            now + Duration::from_secs(302),
+            vec![Some((1, 9, 3, 4, 5))],
+            probe,
+        );
+        assert_eq!(calls.get(), 4);
+    }
     use super::*;
     #[test]
     fn process_stat_handles_spaces_parentheses_and_start_time() {
@@ -793,11 +880,21 @@ mod tests {
             sample.applications[0].requested_gpu.as_deref(),
             Some("0000:0e:00.0")
         );
+        let audit = crate::applications::launch_path(&sample.applications[0], &Config::default());
+        assert_eq!(
+            audit.kind,
+            crate::applications::LaunchKind::RegisteredCommand
+        );
+        assert_eq!(audit.registration.unwrap().pid, 10);
         // Reusing a PID with a different start-time cannot inherit the old profile.
         fs::remove_dir_all(proc.join("11")).unwrap();
         process_fixture(&proc, 11, 1, 300, client);
         let sample = collector.sample(&Config::default());
         assert!(sample.applications[0].requested_gpu.is_none());
+        assert_eq!(
+            crate::applications::launch_path(&sample.applications[0], &Config::default()).kind,
+            crate::applications::LaunchKind::Unregistered
+        );
         // Connector/device disappearance is rediscovered, not attached by cardN.
         fs::remove_dir_all(sys.join("class/drm/card8")).unwrap();
         assert!(collector.sample(&Config::default()).gpus.is_empty());
