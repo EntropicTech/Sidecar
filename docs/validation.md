@@ -387,3 +387,36 @@ missing display, delayed/missing hosts, duplicate startup and Quit). Each instal
 binary's SHA-256 matched the installed release manifest. A targeted audit found
 no checkout references in active autostart, user units or application launchers.
 `igpu-man` resolves through the user's PATH to `~/.local/bin/igpu-man`.
+
+
+## Coordinated updates and public upstream — November 1, 2026
+
+Source was reviewed for private data and published to
+[EntropicTech/Sidecar](https://github.com/EntropicTech/Sidecar). Local `make check`,
+`make test` (50 Rust tests plus native arguments, integration, maintenance lease
+and responsiveness), release/manifest, staged system/user packaging and update
+transaction fixtures passed. The maintenance tests use a real private-bus collector;
+the updater fixtures fake systemd, not the collector. Success preserves byte-identical
+configuration/recordings/autostart, active capture is refused, restart failure restores
+programs, and an interrupted stopped service can recover. Malformed/wrong nonces,
+restart-carried exclusion and continued sampling under a lease are exercised.
+The bounded stdin RPC bridge avoids putting registration payloads in argv.
+
+The first older live install required a deliberate bootstrap; subsequent actual
+`make update-user` runs completed the normal staged/leased/restarted/verified path.
+The installed service stayed enabled and returned active, one saved profile and
+original recordings 1/2 survived, and both live launch identities were preserved.
+No browser or other workload was restarted. Private data backups and the last two
+successful program rollback sets are retained under the XDG state directory.
+The latest native startup remained tray-only; no logout/reboot was performed.
+
+A hosted non-root Arch-container build completed a real package and all 50 Rust
+checks; it exposed a missing hicolor-icon-theme dependency and GCC/Rust mixed-LTO
+link incompatibility. The recipe now declares the icon theme/direct libgcc, disables
+GCC object LTO while retaining Cargo thin LTO, and CI fails on namcap errors rather
+than trusting its exit status alone. Runtime-loaded-library warnings are explained
+in the release guide. Hosted checks are tracked in
+[Actions](https://github.com/EntropicTech/Sidecar/actions); a previous revision's
+success is not exact-source release acceptance. No AUR submission, devtools
+clean-chroot acceptance, CachyOS inclusion, suspend/resume result or new gaming/
+collector-overhead measurement is claimed by this update pass.

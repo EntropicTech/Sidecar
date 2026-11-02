@@ -18,9 +18,6 @@ import tempfile
 import time
 
 ROOT=Path(__file__).resolve().parents[1]
-BUS='io.github.igpu_man.Collector'
-OBJECT='/io/github/igpu_man/Collector'
-INTERFACE=BUS+'1'
 NAMES=['igpu-man','igpu-mand','igpu-man-desktop']
 
 class UpdateError(RuntimeError): pass

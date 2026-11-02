@@ -45,8 +45,8 @@ make recover-user RUN=/absolute/path/to/run-transaction
 ```
 
 Recovery refuses an active recording and leaves saved user data untouched. Keep
-free space for staged binaries plus a database/program backup. A hidden, bounded stdin-to-D-Bus CLI bridge keeps registration payloads/nonces
-out of process arguments; recovery builds that bridge before use. No updater runs
+free space for staged binaries plus a database/program backup. A hidden, bounded
+stdin-to-D-Bus CLI bridge keeps registration payloads/nonces out of process arguments; recovery builds that bridge before use. No updater runs
 in the background; there is no automatic download, poller or privilege helper.
 
 ## Packaging and release bar
@@ -65,7 +65,11 @@ Arch GCC object LTO is disabled for the bundled SQLite C objects; Cargo keeps
 its own thin Rust LTO. Rust dependencies are fetched in prepare with `--locked`; build/check use
 `--frozen` and a controlled target directory. Production does not enable the
 screenshot/failure-injection feature. The Arch CI job builds a real package as a
-non-root user in a fresh Arch container and runs namcap. This is useful isolation,
+non-root user in a fresh Arch container and fails on namcap errors.
+The icon-theme hierarchy and direct libgcc dependency are declared. Warnings for
+runtime-loaded EGL/Wayland/X11/font libraries and D-Bus/systemd remain reviewed
+requirements even when ELF dependency scanning labels them unused; the ELF
+interpreter can also be reported as unused. This is useful isolation,
 not a claim that devtools clean-chroot acceptance has already passed. Before
 submission run the current Arch clean-chroot procedure and resolve namcap findings,
 validate runtime dependencies and installation/removal, and repeat native lifecycle,

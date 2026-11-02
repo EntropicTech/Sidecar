@@ -17,7 +17,7 @@ jobs:
         run: |
           runuser -u builder -- make dist
           runuser -u builder -- bash -c 'cd dist && makepkg --cleanbuild --noconfirm'
-          runuser -u builder -- bash -c 'cd dist && makepkg --printsrcinfo > .SRCINFO && namcap PKGBUILD *.pkg.tar.zst'
+          runuser -u builder -- bash -c 'set -euo pipefail; cd dist; makepkg --printsrcinfo > .SRCINFO; namcap PKGBUILD *.pkg.tar.zst 2>&1 | tee namcap.log; if grep -qE "(^|[[:space:]])E:" namcap.log; then exit 1; fi'
       - uses: actions/upload-artifact@v4
         with:
           name: arch-package
@@ -25,6 +25,7 @@ jobs:
             dist/*.pkg.tar.zst
             dist/PKGBUILD
             dist/.SRCINFO
+            dist/namcap.log
             dist/SHA256SUMS
             dist/igpu-man-*.tar.gz
           include-hidden-files: true
