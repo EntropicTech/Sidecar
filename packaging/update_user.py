@@ -32,9 +32,9 @@ def run(args, *, timeout=35, check=True, env=None, cwd=None):
 
 def rpc(method,value=None):
     value=dict(value or {},_request_id=f'{os.getpid()}-{time.monotonic_ns()}-1')
-    p=run(['qdbus6',BUS,OBJECT,INTERFACE+'.Request',method,json.dumps(value)],check=False)
+    p=run(['busctl','--user','--json=short','call',BUS,OBJECT,INTERFACE,'Request','ss',method,json.dumps(value)],check=False)
     if p.returncode:raise UpdateError(f'Collector rejected {method}; no request payload was logged. Check recording/maintenance state.')
-    return json.loads(p.stdout)
+    return json.loads(json.loads(p.stdout)['data'][0])
 
 def atomic(path,data,mode=0o600):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -76,12 +76,13 @@ def gui_status(binary):return json.loads(run([binary,'--status']).stdout)
 
 def close_gui(binary):
     # Independent of installed executables so interrupted/corrupt GUI updates can recover.
-    args=['qdbus6','org.freedesktop.DBus','/org/freedesktop/DBus','org.freedesktop.DBus.NameHasOwner','io.github.igpu_man.Dashboard']
-    if run(args).stdout.strip()=='false':return
-    run(['qdbus6','io.github.igpu_man.Dashboard','/io/github/igpu_man/Dashboard','io.github.igpu_man.Dashboard1.Quit'])
+    args=['busctl','--user','--json=short','call','org.freedesktop.DBus','/org/freedesktop/DBus','org.freedesktop.DBus','NameHasOwner','s','io.github.igpu_man.Dashboard']
+    def exists():return json.loads(run(args).stdout)['data'][0]
+    if not exists():return
+    run(['busctl','--user','call','io.github.igpu_man.Dashboard','/io/github/igpu_man/Dashboard','io.github.igpu_man.Dashboard1','Quit'])
     deadline=time.monotonic()+8
     while time.monotonic()<deadline:
-        if run(args).stdout.strip()=='false':return
+        if not exists():return
         time.sleep(.05)
     raise UpdateError('Dashboard did not exit')
 

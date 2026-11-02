@@ -8,9 +8,9 @@ def main():
   env=dict(os.environ,XDG_CONFIG_HOME=temporary+'/config',XDG_DATA_HOME=temporary+'/data',XDG_STATE_HOME=temporary+'/state')
   child=None
   def rpc(op,value=None,ok=True):
-   p=subprocess.run(['qdbus6','io.github.igpu_man.Collector','/io/github/igpu_man/Collector','io.github.igpu_man.Collector1.Request',op,json.dumps(value or {})],env=env,capture_output=True,text=True,timeout=5)
+   p=subprocess.run(['busctl','--user','--json=short','call','io.github.igpu_man.Collector','/io/github/igpu_man/Collector','io.github.igpu_man.Collector1','Request','ss',op,json.dumps(value or {})],env=env,capture_output=True,text=True,timeout=5)
    assert (p.returncode==0)==ok,(op,p.stderr)
-   return json.loads(p.stdout) if ok else None
+   return json.loads(json.loads(p.stdout)['data'][0]) if ok else None
   def start(token=None):
    e=dict(env)
    if token:e['IGPU_MAN_UPDATE_TOKEN']=token
