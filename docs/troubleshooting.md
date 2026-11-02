@@ -220,3 +220,15 @@ Display/KWin information retains its 30-second refresh. In dashboard `--status`,
 `telemetry_wakeups` stays constant in a quiet tray; it advances on reopening or
 explicit events. A status probe alone must not wake telemetry. Higher RAM after
 opening a dashboard can reflect retained Rust/model/allocator state.
+
+
+
+For a user-service collector with unavailable per-process accounting, compare its
+procfs access with a standalone collector before attributing the failure to a GPU
+driver. User-service mount sandboxing can implicitly create a user namespace even
+when the direct PrivateUsers property is off. Review the effective unit and its
+namespace requirements; standalone tests do not validate the systemd execution
+context. Do not add root/ptrace capabilities or change global kernel permissions.
+A persistent sandbox reduction needs explicit review. See the public
+[systemd execution documentation](https://freedesktop.org/software/systemd/man/latest/systemd.exec.html)
+and [procfs access-mode checks](https://man.archlinux.org/man/ptrace.2.en).

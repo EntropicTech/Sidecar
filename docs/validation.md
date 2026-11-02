@@ -488,3 +488,13 @@ dbus-run-session -- python3 tests/measure_runtime.py /tmp/background.json --coll
 Installation/update checks retain the existing coordinated updater safety gates.
 Native suspend/resume, physical monitor reconnect and gaming benefit are not
 claimed by this pass. Hosted exact-source outcomes are recorded in Actions.
+
+
+
+Hosted portable checks and the Arch package build passed for implementation
+revision 147873e. Standalone private-bus validation does not establish installed
+systemd-user service accounting coverage. An additional real-unit acceptance check
+is needed (Q22): filesystem mount sandboxing in a user manager can implicitly
+create a user namespace and prevent cross-process procfs access. Any service-policy
+change requires separate review; the current unit has not been changed by this pass.
+No private live-install diagnostics are published in this service caveat.
