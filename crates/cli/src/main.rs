@@ -66,9 +66,7 @@ enum Commands {
     },
     /// Internal explicit trial launch; no profile is persisted.
     #[command(hide = true)]
-    TryProfile {
-        profile_json: String,
-    },
+    TryProfile,
     Run {
         #[arg(long)]
         gpu: String,
@@ -84,6 +82,9 @@ enum Commands {
         command: Vec<OsString>,
     },
     Launch {
+        /// Desktop integration: forward only to a registered matching Firefox instance.
+        #[arg(long)]
+        normal: bool,
         profile: String,
         #[arg(last = true)]
         arguments: Vec<OsString>,
@@ -112,6 +113,27 @@ enum Commands {
 #[derive(Subcommand)]
 enum ProfileCommand {
     List,
+    /// Preview or apply reversible routing for ordinary desktop launches.
+    Normal {
+        name: String,
+        #[arg(long)]
+        desktop_id: String,
+        #[arg(long)]
+        default_browser: bool,
+        #[arg(long, help = "Apply the preview; without this flag nothing changes")]
+        apply: bool,
+    },
+    CheckNormal,
+    /// Remove only legacy app-startup changes, keeping normal launcher routing.
+    RemoveLogin {
+        name: String,
+    },
+    UndoNormal {
+        name: String,
+    },
+    ResumeNormal {
+        name: String,
+    },
     Import {
         name: String,
         desktop_id: String,
@@ -233,13 +255,7 @@ fn run() -> Result<()> {
     });
     match cli.command {
         Commands::InternalRequest { operation } => {
-            use std::io::Read;
-            let mut bytes = Vec::new();
-            std::io::stdin()
-                .take(1024 * 1024 + 1)
-                .read_to_end(&mut bytes)?;
-            anyhow::ensure!(bytes.len() <= 1024 * 1024, "Internal request exceeds 1 MiB");
-            let payload: Value = serde_json::from_slice(&bytes)?;
+            let payload: Value = serde_json::from_slice(&internal_input()?)?;
             let result: Value = client::call(&operation, &payload)?;
             print(&result)?;
         }
@@ -297,9 +313,9 @@ fn run() -> Result<()> {
                 json!({"executable": executable, "managed_elsewhere": elsewhere}),
             )?)?;
         }
-        Commands::TryProfile { profile_json } => {
-            let profile: Profile = serde_json::from_str(&profile_json)?;
-            igpu_core::config::validate_profile(&profile)?;
+        Commands::TryProfile => {
+            let profile: Profile = serde_json::from_slice(&internal_input()?)?;
+            igpu_core::config::validate_profile_input(&profile)?;
             if profile.record || profile.mangohud {
                 bail!("Placement trials do not start recordings or MangoHud");
             }
@@ -424,16 +440,83 @@ fn run() -> Result<()> {
                 command[1..].to_vec(),
             )?;
         }
-        Commands::Launch { profile, arguments } => {
-            let profiles: Vec<Profile> = client::call("profiles", &json!({}))?;
-            let profile = profiles
-                .into_iter()
-                .find(|p| p.name == profile)
-                .context("Unknown profile")?;
-            let args = launch::profile_arguments(&profile, &arguments)?;
-            execute(profile, args)?;
+        Commands::Launch {
+            normal,
+            profile,
+            arguments,
+        } => {
+            let result = (|| -> Result<()> {
+                if normal {
+                    // The collector's login service can still be coming up. No app
+                    // is launched with silently missing selection/registration.
+                    let until = std::time::Instant::now() + std::time::Duration::from_secs(15);
+                    if snapshot().is_err() {
+                        if let Err(error) = client::start_collector_service() {
+                            igpu_core::logging::event(
+                                "warn",
+                                "launch.collector_start_unavailable",
+                                igpu_core::logging::error_fields(&error),
+                            );
+                        }
+                    }
+                    while snapshot().is_err() && std::time::Instant::now() < until {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                    }
+                }
+                let profiles: Vec<Profile> = client::call("profiles", &json!({}))?;
+                let profile = profiles
+                    .into_iter()
+                    .find(|p| p.name == profile)
+                    .context("Unknown profile")?;
+                let args = launch::profile_arguments(&profile, &arguments)?;
+                execute_mode(profile, args, normal)
+            })();
+            if normal && result.is_err() {
+                if let Err(error) = client::notify_launch_failure() {
+                    igpu_core::logging::event(
+                        "warn",
+                        "launch.notification_unavailable",
+                        igpu_core::logging::error_fields(&error),
+                    );
+                }
+            }
+            result?;
         }
         Commands::Profile { command } => match command {
+            ProfileCommand::Normal {
+                name,
+                desktop_id,
+                default_browser,
+                apply,
+            } => {
+                let setup = igpu_core::normal_launch::Setup {
+                    profile: name,
+                    desktop_id,
+                    cli_path: std::env::current_exe()?,
+                    login: false,
+                    default_browser,
+                };
+                let preview: igpu_core::normal_launch::Preview =
+                    client::call("normal_launch_preview", &setup)?;
+                if apply {
+                    print(&rpc(
+                        "normal_launch_apply",
+                        json!({"setup":setup,"token":preview.token}),
+                    )?)?;
+                } else {
+                    print(&serde_json::to_value(preview)?)?;
+                }
+            }
+            ProfileCommand::RemoveLogin { name } => {
+                print(&rpc("normal_launch_remove_login", json!({"profile":name}))?)?
+            }
+            ProfileCommand::CheckNormal => print(&rpc("normal_launch_status", json!({}))?)?,
+            ProfileCommand::UndoNormal { name } => {
+                print(&rpc("normal_launch_undo", json!({"profile":name}))?)?
+            }
+            ProfileCommand::ResumeNormal { name } => {
+                print(&rpc("normal_launch_resume", json!({"profile":name}))?)?
+            }
             ProfileCommand::List => print(&rpc("profiles", json!({}))?)?,
             ProfileCommand::Import {
                 name,
@@ -483,19 +566,12 @@ fn run() -> Result<()> {
                 print(&rpc("delete_profile", json!({"name": name}))?)?
             }
             ProfileCommand::Launcher { name } => {
-                let profiles: Vec<Profile> = client::call("profiles", &json!({}))?;
-                let profile = profiles
-                    .iter()
-                    .find(|p| p.name == name)
-                    .context("Unknown profile")?;
-                let paths = Paths::discover()?;
-                fs::create_dir_all(&paths.applications)?;
-                let file = paths
-                    .applications
-                    .join(format!("igpu-man-{}.desktop", profile.name));
-                fs::write(
-                    &file,
-                    launch::desktop_entry(profile, &std::env::current_exe()?)?,
+                let file: PathBuf = client::call(
+                    "create_launcher",
+                    &igpu_core::api::CreateLauncher {
+                        name,
+                        cli_path: std::env::current_exe()?,
+                    },
                 )?;
                 println!("{}", file.display());
             }
@@ -574,7 +650,22 @@ fn find_program(program: &str) -> Result<PathBuf> {
     bail!("Executable '{program}' not found or not executable")
 }
 
-fn execute(mut profile: Profile, args: Vec<OsString>) -> Result<()> {
+fn internal_input() -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(bytes.len() <= 1024 * 1024, "Internal input exceeds 1 MiB");
+    Ok(bytes)
+}
+
+fn execute(profile: Profile, args: Vec<OsString>) -> Result<()> {
+    execute_mode(profile, args, false)
+}
+fn execute_mode(mut profile: Profile, args: Vec<OsString>, normal: bool) -> Result<()> {
+    // Recovery intent belongs to durable config, never a launch specification.
+    profile.pending_launcher = None;
     if profile.record {
         client::require_feature("guarded_stop")?;
     }
@@ -582,7 +673,16 @@ fn execute(mut profile: Profile, args: Vec<OsString>) -> Result<()> {
     let gpu = launch::resolve_gpu(&s.gpus, &profile.gpu)?;
     profile.gpu = gpu.pci.clone();
     let firefox = profile.firefox || launch::is_firefox(&profile.executable);
-    if firefox && launch::firefox_running(Path::new("/proc"), std::process::id()) {
+    if firefox
+        && launch::firefox_running(Path::new("/proc"), std::process::id())
+        && !(normal
+            && launch::registered_firefox_instance(
+                &s,
+                &profile,
+                Path::new("/proc"),
+                std::process::id(),
+            ))
+    {
         bail!("Firefox is already running. Fully exit it, then launch this profile so the new GPU settings take effect. No processes were terminated.");
     }
     find_program(&profile.executable)?;

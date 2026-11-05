@@ -43,8 +43,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    let vendor = root.join("vendor");
+    if vendor.is_dir() {
+        sources(&vendor, &mut files)?;
+    }
     files.sort();
     println!("cargo:rerun-if-changed={}", root.join("crates").display());
+    println!("cargo:rerun-if-changed={}", vendor.display());
     let mut child = Command::new("sha256sum")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -9,21 +9,35 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: rustfmt, clippy
       - run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libxkbcommon-x11-0 libegl1-mesa-dev libx11-dev libxcb1-dev libfontconfig1-dev dbus desktop-file-utils xvfb xauth libgl1-mesa-dri
+      - run: python3 tests/verify_vendor.py
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: cargo build --workspace --locked
+      - run: cargo build -p igpu-core --example service_fixture --locked
       - run: python3 tests/native_arguments.py
+      - run: dbus-run-session -- python3 tests/fixture_isolation.py
+      - run: dbus-run-session -- python3 tests/security_boundaries.py
+      - run: dbus-run-session -- python3 tests/normal_launches.py
+      - run: dbus-run-session -- python3 tests/app_routing.py
       - run: dbus-run-session -- python3 tests/integration.py
       - run: dbus-run-session -- python3 tests/update_protocol.py
       - run: dbus-run-session -- python3 tests/recording_responsiveness.py
+      - run: dbus-run-session -- python3 tests/recording_integrity.py
       - run: python3 tests/check_docs.py
+      - run: python3 -m compileall -q tests packaging
       - run: cargo build --workspace --release --locked
+      - run: xvfb-run -a dbus-run-session -- python3 tests/dashboard_lifecycle.py --runtime-navigation --cycles 2
+        env:
+          IGPU_MAN_BIN_DIR: target/release
+          LIBGL_ALWAYS_SOFTWARE: "1"
       - run: python3 tests/packaging.py
       - run: dbus-run-session -- python3 tests/update_user.py
       - run: cargo build --workspace --features igpu-man-desktop/screenshot --locked

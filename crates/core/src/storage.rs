@@ -469,6 +469,10 @@ impl Store {
         if ids.len() < 2 {
             bail!("Select at least two recordings");
         }
+        anyhow::ensure!(
+            ids.iter().collect::<std::collections::BTreeSet<_>>().len() == ids.len(),
+            "Compare requires distinct recording IDs; one recording cannot count as multiple runs"
+        );
         let recordings: Vec<_> = ids.iter().map(|&id| self.get(id)).collect::<Result<_>>()?;
         let reference = &recordings[0].metadata["environment"];
         let mut mismatches: Vec<_> = recordings
@@ -481,6 +485,38 @@ impl Store {
                 )
             })
             .collect();
+        let signatures: Vec<_> = recordings
+            .iter()
+            .map(|r| comparison_settings(r, &mut mismatches))
+            .collect();
+        for (recording, settings) in recordings.iter().zip(&signatures).skip(1) {
+            for (key, label) in [
+                ("sampling", "sampling intervals or stutter threshold"),
+                (
+                    "launches",
+                    "effective launch settings (including GPU targets)",
+                ),
+                (
+                    "saved_profiles",
+                    "saved profile settings; effective launches are unavailable",
+                ),
+            ] {
+                if key == "launches"
+                    && (settings["launches_complete"] != true
+                        || signatures[0]["launches_complete"] != true)
+                {
+                    continue;
+                }
+                if key == "saved_profiles"
+                    && (settings[key].is_null() || signatures[0][key].is_null())
+                {
+                    continue;
+                }
+                if settings[key] != signatures[0][key] {
+                    mismatches.push(format!("Recording {} has different {label} from recording {}. Review intentional condition changes before interpreting results.", recording.id, recordings[0].id));
+                }
+            }
+        }
         let mut groups: BTreeMap<String, Vec<FrameSummary>> = BTreeMap::new();
         let mut details = Vec::new();
         for recording in &recordings {
@@ -523,6 +559,19 @@ impl Store {
             .mode(0o700)
             .create(destination)
             .context("Export destination must be a new directory")?;
+        // Publish the interruption marker durably before any bundle data. A
+        // process crash cannot run an error handler to create it afterward.
+        crate::fsutil::atomic_private_write(
+            &destination.join("INCOMPLETE"),
+            b"Export in progress or interrupted; do not treat this bundle as complete.",
+        )?;
+        fs::File::open(destination)?.sync_all()?;
+        fs::File::open(
+            destination
+                .parent()
+                .context("Export needs a parent directory")?,
+        )?
+        .sync_all()?;
         let result = (|| -> Result<()> {
             write_json(destination.join("metadata.json"), &recording)?;
             let writer = fs::File::create(destination.join("telemetry.jsonl"))?;
@@ -542,6 +591,7 @@ impl Store {
                 writer.write_all(b"\n")?;
             }
             writer.flush()?;
+            writer.get_ref().sync_all()?;
             write_json(destination.join("markers.json"), &recording.markers)?;
             let mut statement = self
                 .db
@@ -567,6 +617,11 @@ impl Store {
                 )?;
                 i += 1;
             }
+            // JSON/CSV helpers sync their files; sync directory entries before
+            // removing the marker. Completion requires no per-sample fsync.
+            fs::File::open(destination)?.sync_all()?;
+            fs::remove_file(destination.join("INCOMPLETE"))?;
+            fs::File::open(destination)?.sync_all()?;
             Ok(())
         })();
         if result.is_err() {
@@ -583,6 +638,85 @@ impl Store {
         }
         result
     }
+}
+
+/// Stable explicit settings only: never compare PID/anchor, verification time,
+/// generated launcher text, or launcher presentation as experimental conditions.
+fn profile_settings(profile: &Value) -> Value {
+    json!({
+        "executable":profile["executable"],
+        "args":profile.get("args").cloned().unwrap_or_else(||json!([])),
+        "gpu":profile["gpu"],
+        "vulkan_only":profile.get("vulkan_only").and_then(Value::as_bool).unwrap_or(false),
+        "firefox":profile.get("firefox").and_then(Value::as_bool).unwrap_or(false),
+        "record":profile.get("record").and_then(Value::as_bool).unwrap_or(false),
+        "mangohud":profile.get("mangohud").and_then(Value::as_bool).unwrap_or(false),
+        "environment":profile.get("environment").cloned().unwrap_or_else(||json!({})),
+        "working_directory":profile["working_directory"],
+        "file_argument":profile["desktop"]["file_argument"],
+    })
+}
+fn comparison_settings(recording: &Recording, warnings: &mut Vec<String>) -> Value {
+    let metadata = &recording.metadata;
+    if metadata["environment"]
+        .as_object()
+        .is_none_or(|m| m.is_empty())
+    {
+        warnings.push(format!(
+            "Recording {} has missing environment/monitor metadata; comparability is unverified.",
+            recording.id
+        ));
+    }
+    let sampling = json!({"normal_interval_ms":metadata["normal_interval_ms"],
+        "recording_interval_ms":metadata["recording_interval_ms"],
+        "stutter_threshold_ms":metadata["stutter_threshold_ms"]});
+    if sampling
+        .as_object()
+        .is_some_and(|m| m.values().any(Value::is_null))
+    {
+        warnings.push(format!(
+            "Recording {} has missing sampling settings; comparability is unverified.",
+            recording.id
+        ));
+    }
+    let mut launches = vec![];
+    let mut complete = true;
+    if let Some(values) = metadata["launches"].as_array().filter(|v| !v.is_empty()) {
+        for launch in values {
+            if launch["profile"].is_object() {
+                let mut profile = profile_settings(&launch["profile"]);
+                // Registered, resolved intent wins over a stored profile alias.
+                if let Some(gpu) = launch.get("gpu").filter(|v| v.is_string()) {
+                    profile["gpu"] = gpu.clone();
+                }
+                if profile["executable"].as_str().is_none_or(str::is_empty)
+                    || profile["gpu"].as_str().is_none_or(str::is_empty)
+                {
+                    complete = false;
+                }
+                launches.push(profile);
+            } else {
+                complete = false;
+            }
+        }
+    } else {
+        complete = false;
+    }
+    launches.sort_by_cached_key(Value::to_string);
+    let saved_profiles = if complete {
+        Value::Null
+    } else {
+        warnings.push(format!("Recording {} has missing effective launch settings; saved profiles alone do not establish what ran.",recording.id));
+        let mut saved: Vec<_> = metadata["profiles"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(profile_settings)
+            .collect();
+        saved.sort_by_cached_key(Value::to_string);
+        json!(saved)
+    };
+    json!({"sampling":sampling,"launches":launches,"launches_complete":complete,"saved_profiles":saved_profiles})
 }
 
 #[derive(serde::Deserialize)]
@@ -629,6 +763,152 @@ fn bounded_json(value: &impl Serialize, limit: usize) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn export_marks_handled_failures_and_preserves_existing_destinations() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.sqlite"), 16).unwrap();
+        let id = store.start("fixture", 1, &json!({})).unwrap();
+        store.stop(id, 2, "complete").unwrap();
+        // Corrupt fixture log fails after telemetry has been written.
+        store
+            .db
+            .execute(
+                "INSERT INTO frame_logs(recording_id,json) VALUES(?1,?2)",
+                params![id, "invalid fixture JSON"],
+            )
+            .unwrap();
+        let destination = dir.path().join("failed-export");
+        assert!(store.export(id, &destination).is_err());
+        assert!(destination.join("metadata.json").exists());
+        assert!(destination.join("INCOMPLETE").exists());
+        assert_eq!(
+            fs::metadata(destination.join("INCOMPLETE"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        store.db.execute("DELETE FROM frame_logs", []).unwrap();
+        let contents = fs::read(destination.join("metadata.json")).unwrap();
+        assert!(store.export(id, &destination).is_err());
+        assert_eq!(
+            fs::read(destination.join("metadata.json")).unwrap(),
+            contents
+        );
+        assert!(destination.join("INCOMPLETE").exists());
+        let complete = dir.path().join("complete-export");
+        store.export(id, &complete).unwrap();
+        assert!(!complete.join("INCOMPLETE").exists());
+        assert!(complete.join("telemetry.jsonl").exists());
+        assert_eq!(
+            fs::metadata(&complete).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+    #[test]
+    fn comparisons_require_distinct_runs_and_check_stable_settings_without_values_in_warnings() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("db.sqlite"), 16).unwrap();
+        let profile = json!({"name":"old-name","executable":"/bin/true","gpu":"igpu", "args":["--quality=low"],
+            "environment":{"FIXTURE_TOKEN":"private-synthetic-value"},"verification":{"unix_ms":1}});
+        let metadata = json!({"environment":{"fixture":"same hardware"},"normal_interval_ms":1000,
+            "recording_interval_ms":250,"stutter_threshold_ms":25,
+            "profiles":[profile],"launches":[{"process":{"pid":1,"start_ticks":10},"anchor_ns":1,"gpu":"pci-a","profile":profile}]});
+        let a = store.start("condition", 1, &metadata).unwrap();
+        store.stop(a, 2, "complete").unwrap();
+        let mut other = metadata.clone();
+        other["launches"][0]["process"] = json!({"pid":55,"start_ticks":900});
+        other["launches"][0]["anchor_ns"] = json!(9999);
+        other["launches"][0]["profile"]["name"] = json!("renamed");
+        other["launches"][0]["profile"]["verification"] = json!({"unix_ms":900});
+        let b = store.start("condition", 3, &other).unwrap();
+        store.stop(b, 4, "complete").unwrap();
+        assert!(store.compare(&[a, a], 25.).is_err());
+        assert!(store.compare(&[a, b, a], 25.).is_err());
+        assert!(store.compare(&[a, b], 25.).unwrap()["mismatch_warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        for (field, value) in [
+            ("args", json!(["--quality=high"])),
+            (
+                "environment",
+                json!({"FIXTURE_TOKEN":"another-private-synthetic-value"}),
+            ),
+            ("working_directory", json!("/tmp/fixture-work")),
+            ("vulkan_only", json!(true)),
+            ("firefox", json!(true)),
+        ] {
+            let mut launches = other["launches"].clone();
+            launches[0]["profile"][field] = value;
+            store.metadata(b, "launches", launches).unwrap();
+            assert!(
+                store.compare(&[a, b], 25.).unwrap()["mismatch_warnings"]
+                    .to_string()
+                    .contains("effective launch settings"),
+                "Missing mismatch for {field}"
+            );
+        }
+        // Changing saved but unused profiles cannot falsely report a changed workload.
+        store
+            .metadata(b, "launches", other["launches"].clone())
+            .unwrap();
+        store.metadata(b, "profiles", json!([])).unwrap();
+        assert!(store.compare(&[a, b], 25.).unwrap()["mismatch_warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        let first = other["launches"][0].clone();
+        let mut second = first.clone();
+        second["profile"]["executable"] = json!("/bin/printf");
+        store
+            .metadata(a, "launches", json!([first, second]))
+            .unwrap();
+        store
+            .metadata(b, "launches", json!([second, first]))
+            .unwrap();
+        assert!(store.compare(&[a, b], 25.).unwrap()["mismatch_warnings"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        store
+            .metadata(a, "launches", metadata["launches"].clone())
+            .unwrap();
+        store
+            .metadata(b, "launches", other["launches"].clone())
+            .unwrap();
+        store
+            .metadata(b, "recording_interval_ms", json!(500))
+            .unwrap();
+        let mut launches = other["launches"].clone();
+        launches[0]["profile"]["args"] = json!(["--quality=high"]);
+        launches[0]["profile"]["environment"]["FIXTURE_TOKEN"] =
+            json!("another-private-synthetic-value");
+        launches[0]["gpu"] = json!("pci-b");
+        store.metadata(b, "launches", launches).unwrap();
+        let warnings = store.compare(&[a, b], 25.).unwrap()["mismatch_warnings"].to_string();
+        assert!(
+            warnings.contains("sampling intervals")
+                && warnings.contains("effective launch settings")
+        );
+        assert!(!warnings.contains("private-synthetic-value") && !warnings.contains("--quality"));
+        store.metadata(b, "launches", json!([])).unwrap();
+        let warnings = store.compare(&[a, b], 25.).unwrap()["mismatch_warnings"].to_string();
+        assert!(warnings.contains("missing effective launch settings"));
+        store.metadata(a, "launches", json!([])).unwrap();
+        assert!(store.compare(&[a, b], 25.).unwrap()["mismatch_warnings"]
+            .to_string()
+            .contains("saved profile settings"));
+        let legacy = store.start("legacy", 5, &json!({})).unwrap();
+        store.stop(legacy, 6, "complete").unwrap();
+        assert!(
+            store.compare(&[legacy, b], 25.).unwrap()["mismatch_warnings"]
+                .to_string()
+                .contains("missing sampling settings")
+        );
+    }
     #[test]
     fn raw_pages_preserve_duplicate_timestamps_and_thin_timeline_omits_process_data() {
         let dir = tempfile::tempdir().unwrap();

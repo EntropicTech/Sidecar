@@ -132,7 +132,7 @@ fn unescape(value: &str) -> String {
     result
 }
 
-fn parse_entry(id: &str, path: &Path, raw: &str) -> Option<InstalledLauncher> {
+pub(crate) fn parse_entry(id: &str, path: &Path, raw: &str) -> Option<InstalledLauncher> {
     let mut fields = BTreeMap::new();
     let mut main = false;
     for line in raw.lines().map(str::trim) {
@@ -185,6 +185,9 @@ fn parse_entry(id: &str, path: &Path, raw: &str) -> Option<InstalledLauncher> {
     .map(|v| unescape(v))
     .unwrap_or_else(|| id.to_owned());
     let profile = (|| -> Result<Profile> {
+        if !field("X-Sidecar-Profile").is_empty() {
+            bail!("Managed by Sidecar; use Profiles to check or undo normal-launch settings");
+        }
         if field("Terminal") == "true" {
             bail!("Terminal launchers need a manually configured profile");
         }

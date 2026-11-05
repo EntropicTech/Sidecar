@@ -33,6 +33,8 @@ pub struct Candidate {
     pub source: String,
     #[serde(default)]
     pub launch_path: LaunchPath,
+    #[serde(default)]
+    pub verification: Option<Verification>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -280,7 +282,7 @@ pub fn candidates<S: Borrow<Snapshot>>(
         };
         result.push(Candidate { process: app.id.clone(), name: app.name.clone(), executable: app.executable.clone(), management, profile, saved_target,
             graphics_percent: mean[0], video_percent: mean[1], other_percent: mean[2], observed_seconds, active_seconds, score,
-            observed_gpus: app.observed_gpus.clone(), launch_path: path, source: "Accessible DRM clients via /proc/fdinfo; time-weighted last 60 seconds. Engine times are not whole-device GPU shares or predicted FPS gains.".into() });
+            observed_gpus: app.observed_gpus.clone(), launch_path: path, verification:None, source: "Accessible DRM clients via /proc/fdinfo; time-weighted last 60 seconds. Engine times are not whole-device GPU shares or predicted FPS gains.".into() });
     }
     result.sort_by(|a, b| {
         let rank = |c: &Candidate| {
@@ -528,6 +530,8 @@ mod tests {
             gpus: vec![Gpu {
                 pci: "dgpu".into(),
                 name: "dGPU".into(),
+                display_name: None,
+                display_name_source: None,
                 alias: "dgpu".into(),
                 integrated: false,
                 card: "".into(),

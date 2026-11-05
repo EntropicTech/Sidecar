@@ -1,0 +1,22 @@
+--- a/src/native/run.rs
++++ b/src/native/run.rs
+@@ -319,6 +319,19 @@
+ 
+     let mut app = WinitAppWrapper::new(winit_app, true);
+     event_loop.run_app_on_demand(&mut app)?;
++    // Sidecar compatibility patch: Wayland Window::drop defers retirement to
++    // the next iteration. Drain it before a caller parks on a non-winit channel.
++    // No window/GL context is created, and no timer runs while parked.
++    #[cfg(target_os = "linux")]
++    {
++        struct DrainWindowRetirement;
++        impl ApplicationHandler<UserEvent> for DrainWindowRetirement {
++            fn resumed(&mut self, _: &ActiveEventLoop) {}
++            fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: winit::event::WindowEvent) {}
++            fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) { event_loop.exit(); }
++        }
++        event_loop.run_app_on_demand(&mut DrainWindowRetirement)?;
++    }
+     log::debug!("eframe window closed");
+     app.return_result
+ }

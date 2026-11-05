@@ -454,6 +454,13 @@ impl State {
                 if !std::path::Path::new(executable).is_absolute() || executable.contains('\0') {
                     bail!("Expected an absolute executable identity");
                 }
+                if value["managed_elsewhere"].as_bool() == Some(true) {
+                    for profile in &self.config.profiles {
+                        if launchers::same_executable(&profile.executable, executable) {
+                            anyhow::ensure!(!igpu_core::normal_launch::is_managed(&self.paths, &profile.name)?, "Undo this application's normal-launch changes before choosing Managed elsewhere");
+                        }
+                    }
+                }
                 let mut next = self.config.clone();
                 next.managed_elsewhere
                     .retain(|p| !launchers::same_executable(p, executable));
@@ -543,10 +550,82 @@ impl State {
                     json!({"profile_saved": true, "launcher_path": outcome.launcher,"launcher_warning":outcome.warning, "verification": verification}),
                 )
             }
+            Operation::AppRouteApply => {
+                anyhow::ensure!(
+                    self.active.is_none(),
+                    "Finish the active recording before changing app routing"
+                );
+                let gpus: Vec<_> = snapshot.gpus.iter().filter(|g| g.integrated).collect();
+                anyhow::ensure!(
+                    gpus.len() == 1,
+                    "A single iGPU is required; use Advanced for custom selection"
+                );
+                let request: igpu_core::normal_launch::AppApply = serde_json::from_value(value)?;
+                Ok(serde_json::to_value(igpu_core::normal_launch::app_apply(
+                    &self.paths,
+                    &mut self.config,
+                    &request.setup,
+                    &gpus[0].pci,
+                    &request.token,
+                )?)?)
+            }
+            Operation::NormalLaunchApply => {
+                anyhow::ensure!(
+                    self.active.is_none(),
+                    "Finish the active recording before changing normal launches"
+                );
+                let request: igpu_core::normal_launch::Apply = serde_json::from_value(value)?;
+                let profile = self
+                    .config
+                    .profiles
+                    .iter()
+                    .find(|p| p.name == request.setup.profile)
+                    .context("Unknown profile")?;
+                anyhow::ensure!(
+                    launch::resolve_gpu(&snapshot.gpus, &profile.gpu)?.integrated,
+                    "Choose an iGPU profile for normal launches"
+                );
+                Ok(serde_json::to_value(igpu_core::normal_launch::apply(
+                    &self.paths,
+                    &self.config,
+                    &request.setup,
+                    &request.token,
+                )?)?)
+            }
+            Operation::NormalLaunchResume
+            | Operation::NormalLaunchUndo
+            | Operation::NormalLaunchRemoveLogin => {
+                anyhow::ensure!(
+                    self.active.is_none(),
+                    "Finish the active recording before changing normal launches"
+                );
+                let name = text("profile")?;
+                Ok(serde_json::to_value(
+                    if method == Operation::NormalLaunchUndo {
+                        igpu_core::normal_launch::undo_with_config(
+                            &self.paths,
+                            name,
+                            &mut self.config,
+                        )?
+                    } else if method == Operation::NormalLaunchRemoveLogin {
+                        igpu_core::normal_launch::remove_login(&self.paths, name)?
+                    } else {
+                        igpu_core::normal_launch::resume_with_config(
+                            &self.paths,
+                            name,
+                            &mut self.config,
+                        )?
+                    },
+                )?)
+            }
             Operation::Profiles => Ok(serde_json::to_value(&self.config.profiles)?),
             Operation::SaveProfile => {
                 let mut profile: Profile = serde_json::from_value(value)?;
-                igpu_core::config::validate_profile(&profile)?;
+                igpu_core::config::validate_profile_input(&profile)?;
+                anyhow::ensure!(
+                    !igpu_core::normal_launch::is_managed(&self.paths, &profile.name)?,
+                    "Undo normal-launch management before editing this profile"
+                );
                 profile.gpu = launch::resolve_gpu(&snapshot.gpus, &profile.gpu)?
                     .pci
                     .clone();
@@ -557,8 +636,26 @@ impl State {
                 self.config = next;
                 Ok(serde_json::to_value(profile)?)
             }
+            Operation::CreateLauncher => {
+                let request: igpu_core::api::CreateLauncher = serde_json::from_value(value)?;
+                let profile = self
+                    .config
+                    .profiles
+                    .iter()
+                    .find(|p| p.name == request.name)
+                    .context("Unknown profile")?;
+                Ok(serde_json::to_value(launch::create_profile_launcher(
+                    &self.paths,
+                    profile,
+                    &request.cli_path,
+                )?)?)
+            }
             Operation::DeleteProfile => {
                 let name = text("name")?;
+                anyhow::ensure!(
+                    !igpu_core::normal_launch::is_managed(&self.paths, name)?,
+                    "Undo normal-launch management before deleting this profile"
+                );
                 let mut next = self.config.clone();
                 if !next.profiles.iter().any(|p| p.name == name) {
                     bail!("Profile does not exist");
@@ -570,6 +667,9 @@ impl State {
             }
             Operation::RegisterLaunch => {
                 let registration: LaunchRegistration = serde_json::from_value(value)?;
+                if let Some(profile) = &registration.profile {
+                    igpu_core::config::validate_profile_input(profile)?;
+                }
                 let path = PathBuf::from(format!("/proc/{}/stat", registration.process.pid));
                 let process = collector::read_process_stat(&path, registration.process.pid)
                     .context("Launch process disappeared")?
@@ -664,6 +764,11 @@ impl State {
                 self.store.delete(id()?)?;
                 Ok(json!(true))
             }
+            Operation::NormalLaunchPreview
+            | Operation::NormalLaunchStatus
+            | Operation::AppRoutePreview => {
+                bail!("Normal-launch reads require the bounded read worker")
+            }
             Operation::Experiment => Ok(serde_json::to_value(recording::experiment_template())?),
         }
     }
@@ -673,8 +778,7 @@ struct Service {
     live: Arc<Mutex<live::Live>>,
     writer: worker::Writer,
     read_path: PathBuf,
-    jobs: Arc<tokio::sync::Semaphore>,
-    writes: Arc<tokio::sync::Semaphore>,
+    admission: dispatch::Admission,
 }
 
 fn task_failure(error: tokio::task::JoinError, worker: &str) -> anyhow::Error {
@@ -709,22 +813,11 @@ impl Service {
                     .into(),
             ));
         }
-        let mut value: Value = serde_json::from_str(payload).map_err(|_| {
-            igpu_core::logging::event(
-                "warn",
-                "api.request_rejected",
-                json!({"reason":"invalid_json"}),
-            );
-            zbus::fdo::Error::InvalidArgs("Invalid JSON request".into())
-        })?;
-        if !value.is_object() {
-            igpu_core::logging::event(
-                "warn",
-                "api.request_rejected",
-                json!({"reason":"invalid_envelope"}),
-            );
-            return Err(zbus::fdo::Error::InvalidArgs("JSON object required".into()));
-        }
+        let parsed_operation = Operation::parse(operation)
+            .map_err(|_| zbus::fdo::Error::InvalidArgs("Unknown API operation".into()))?;
+        // No expensive JSON parsing, state cloning or work is admitted on a full
+        // class. Blocking jobs keep their permit even if the caller disconnects.
+        let (mut value, permit) = self.admission.parse(parsed_operation, payload).await?;
         let request_id = value["_request_id"]
             .as_str()
             .filter(|s| s.len() <= 96 && s.bytes().all(|c| c.is_ascii_digit() || c == b'-'))
@@ -734,18 +827,15 @@ impl Service {
             .as_object_mut()
             .expect("object envelope validated")
             .remove("_request_id");
-        let parsed_operation = Operation::parse(operation);
-        let observed_operation = parsed_operation
-            .as_ref()
-            .map(|op| op.as_str())
-            .unwrap_or("unknown");
+        let observed_operation = parsed_operation.as_str();
         let started = std::time::Instant::now();
-        let mutation = parsed_operation.as_ref().is_ok_and(|op| op.mutation());
-        let result = match parsed_operation {
-            Ok(operation) => self.dispatch(operation, value).await,
-            Err(error) => Err(error),
-        }
-        .map_err(|error| zbus::fdo::Error::Failed(igpu_core::logging::diagnostic_message(&error)));
+        let mutation = parsed_operation.mutation();
+        let result = self
+            .dispatch(parsed_operation, value, permit)
+            .await
+            .map_err(|error| {
+                zbus::fdo::Error::Failed(igpu_core::logging::diagnostic_message(&error))
+            });
         let millis = started.elapsed().as_secs_f64() * 1000.;
         if result.is_err() || mutation || millis > 250.0 {
             let mut fields = json!({"operation":observed_operation,"request_id":request_id,"duration_ms":millis,"outcome":if result.is_ok(){"ok"}else{"error"}});
@@ -847,8 +937,7 @@ async fn run() -> Result<()> {
         live: live.clone(),
         writer: writer.clone(),
         read_path,
-        jobs: Arc::new(tokio::sync::Semaphore::new(2)),
-        writes: Arc::new(tokio::sync::Semaphore::new(8)),
+        admission: dispatch::Admission::new(),
     };
     let _connection = zbus::connection::Builder::session()?
         .name(igpu_core::BUS)?

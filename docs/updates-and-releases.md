@@ -1,7 +1,18 @@
 # Updates and releases
 
-Upstream: https://github.com/EntropicTech/Sidecar. The display name is Sidecar;
+Upstream: [EntropicTech/Sidecar](https://github.com/EntropicTech/Sidecar). The display name is Sidecar;
 binaries, configuration and package identity currently remain `igpu-man`.
+
+## Source pushes and releases
+
+A normal source push publishes the current code/documentation and starts the
+configured checks. It does not tag a version, publish release assets or submit a
+package to AUR/CachyOS. Keep current behavior in [everyday use](user-guide.md),
+installation in [setup](setup.md), commands in [CLI](cli.md) and user-facing changes
+in [the changelog](../CHANGELOG.md). Review all staged paths for private data and
+vendor provenance, run exact-source checks, then use a normal fast-forward push.
+Never force an update over unexpected upstream work. Verify the remote commit and
+report hosted check results separately from local results.
 
 ## Updating this developer installation
 
@@ -100,3 +111,10 @@ Primary references:
 - [AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines)
 - [SRCINFO manual](https://man.archlinux.org/man/SRCINFO.5.en)
 - [Arch clean chroot](https://wiki.archlinux.org/title/Building_in_a_clean_chroot)
+
+
+Normal-launch routes use the installed CLI's absolute path. Developer updates
+back up `normal-launches.json` privately and preserve its originals, derived user
+launchers, startup entries and handler settings. Undo routes before moving the
+installation prefix or uninstalling; after moving, review/reapply with the new
+installed CLI path. Program rollback does not overwrite this user data.

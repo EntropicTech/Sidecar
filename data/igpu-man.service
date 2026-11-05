@@ -12,8 +12,11 @@ Restart=on-failure
 RestartSec=3
 UMask=0077
 NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=full
+# User-service mount sandboxing can create a user namespace that prevents
+# same-account /proc/PID/{exe,fdinfo} inspection. Keep procfs accounting usable.
+PrivateTmp=no
+ProtectSystem=no
+PrivateUsers=no
 
 [Install]
 WantedBy=graphical-session.target

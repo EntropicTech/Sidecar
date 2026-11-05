@@ -18,8 +18,12 @@ impl eframe::App for WindowSession {
             dashboard
                 .visible_flag
                 .store(false, std::sync::atomic::Ordering::Release);
-            let _ = dashboard.sender.send(Action::VisibilityChanged);
-            dashboard.control.parked();
+            // A full work queue already wakes the worker; it reads the atomic
+            // visibility flag after each job. Never block native retirement.
+            let _ = dashboard.sender.try_send(Action::VisibilityChanged);
+            // Stop repaint callbacks now, but do not claim native retirement
+            // until eframe's cleanup drain has returned.
+            dashboard.control.detach();
             match self.parked.lock() {
                 Ok(mut slot) => *slot = Some(dashboard),
                 Err(_) => igpu_core::logging::event("error", "dashboard.park_failed", json!({})),
@@ -46,13 +50,20 @@ pub fn run(
     loop {
         let slot = parked.clone();
         let first = initial.take();
+        let window_size = [1120.0, 780.0];
+        #[cfg(feature = "screenshot")]
+        let window_size = if std::env::var("IGPU_MAN_SCREENSHOT_NARROW").as_deref() == Ok("1") {
+            [520.0, 780.0]
+        } else {
+            window_size
+        };
         eframe::run_native(
             branding::NAME,
             eframe::NativeOptions {
                 run_and_return: true,
                 renderer: eframe::Renderer::Glow,
                 viewport: egui::ViewportBuilder::default()
-                    .with_inner_size([1120.0, 780.0])
+                    .with_inner_size(window_size)
                     .with_app_id(branding::APP_ID)
                     .with_icon(window_icon.clone()),
                 ..Default::default()
@@ -82,13 +93,17 @@ pub fn run(
                     igpu_core::logging::event("info", "dashboard.window_reopened", json!({}));
                     dashboard
                 };
-                let _ = dashboard.sender.send(Action::VisibilityChanged);
+                // A full work queue already wakes the worker; it reads the atomic
+                // visibility flag after each job. Never block native retirement.
+                let _ = dashboard.sender.try_send(Action::VisibilityChanged);
                 Ok(Box::new(WindowSession {
                     dashboard: Some(dashboard),
                     parked: slot,
                 }))
             }),
         )?;
+        control.parked();
+        igpu_core::logging::event("info", "dashboard.window_retired", json!({}));
         let mut guard = parked
             .lock()
             .map_err(|_| eframe::Error::AppCreation("Parked dashboard poisoned".into()))?;
@@ -115,7 +130,11 @@ pub fn run(
                     control.show_requested();
                 }
                 Ok(Action::Close) => control.hide_requested(),
-                Ok(Action::TrialKept) => dashboard.trial_setup = None,
+                Ok(Action::TrialKept(profile)) => {
+                    dashboard.trial_setup = None;
+                    dashboard.begin_normal_setup(&profile);
+                    dashboard.tab = 2;
+                }
                 Ok(_) => {}
             }
         }

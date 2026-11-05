@@ -4,6 +4,14 @@ All diagnostic collection is local. No command uploads data. Share only the outp
 needed for the problem; recordings/exports may contain explicit profile arguments,
 hardware identifiers and notes. Never share the entire config or process environment.
 
+## Find the relevant guide
+
+- [Set up normal iGPU launches](#set-up-normal-igpu-launches)
+- [Black window after Close](#black-sidecar-window-after-title-bar-close)
+- [Developer update recovery](#failed-developer-update)
+- [Launcher conflicts and busy workers](#launcher-conflicts-and-dashboard-work-admission)
+- [Install, login setup and removal](setup.md)
+
 ## Start here
 
 ```sh
@@ -228,8 +236,14 @@ procfs access with a standalone collector before attributing the failure to a GP
 driver. User-service mount sandboxing can implicitly create a user namespace even
 when the direct PrivateUsers property is off. Review the effective unit and its
 namespace requirements; standalone tests do not validate the systemd execution
-context. Do not add root/ptrace capabilities or change global kernel permissions.
-A persistent sandbox reduction needs explicit review. See the public
+context. The shipped compatibility policy is `PrivateTmp=no`, `ProtectSystem=no`,
+`PrivateUsers=no`, retaining `NoNewPrivileges=yes` and `UMask=0077`. Confirm with
+`systemctl --user show igpu-man.service -p PrivateTmp -p ProtectSystem -p PrivateUsers -p NoNewPrivileges`.
+An old installed unit or user override can retain the namespace restrictions;
+use the guarded updater when no recording is active. Compare installed coverage
+and the collector's `/proc/PID/ns/user` with the caller after restart. Do not add
+root/ptrace capabilities or change global kernel permissions. Read the explicit
+sandbox tradeoff in [security](security.md) before changing this policy. See the public
 [systemd execution documentation](https://freedesktop.org/software/systemd/man/latest/systemd.exec.html)
 and [procfs access-mode checks](https://man.archlinux.org/man/ptrace.2.en).
 
@@ -244,3 +258,194 @@ measurements build release binaries and the tray_fixture example, then run
 `dbus-run-session -- python3 tests/measure_threads.py /tmp/threads.json`.
 The script never changes the installed service. Keep machine-specific reports
 local unless sharing is explicitly authorized.
+
+
+## Security-related input and resource errors
+
+A busy `LimitsExceeded` reply means that request was not queued. Live reads have
+four slots, recording reads two, and mutations eight; live/read blocking work retains its
+slot if the caller disconnects. Back off ordinary reads and inspect
+state before retrying a mutation. Envelope-size errors also use LimitsExceeded.
+
+Trial wrappers require bounded stdin; an old dashboard sending profile JSON in
+argv needs a coordinated `make update-user` to replace all three binaries.
+A pending-launcher input rejection protects internal recovery state; do not
+remove it to import a profile. Normal saved-profile launches omit that internal
+field while preserving the durable recovery intent. Existing launcher conflicts
+remain warnings. Diagnostic output over 64 KiB, non-UTF-8 or two seconds is
+unavailable, not a partial successful result. See [security maintenance](security.md).
+
+
+## Recording notes, comparisons and interrupted exports
+
+Legacy widget fixtures use checkbox selection for notes/comparison and separate
+timeline inspection; the installed dashboard has no recording page. Each recording retains its own
+unsaved draft during selection changes and tray parking; Save notes writes only
+that recording. Save drafts before Quit or a developer update.
+
+A duplicate-ID comparison is rejected: choose different runs. Settings warnings
+may describe intentional GPU-condition changes; inspect the run details/notes.
+Missing launch context cannot be repaired by merely creating a matching saved
+profile. Repeat the experiment through an explicit launch if verification is needed.
+Warnings identify categories without exposing profile argument/environment values.
+
+An INCOMPLETE marker means an export is in progress, failed or interrupted. Wait
+for an active export or review the error, then retry to a new absolute directory.
+Do not remove the marker to label partial data complete. Existing failed bundles
+are preserved, and the saved recording is the source for re-export. For an older
+bundle of uncertain origin, re-export from the recording. A timeout is uncertain;
+the server may still finish. Synchronization cannot override filesystem guarantees.
+
+
+## Black Sidecar window after title-bar Close
+
+A previous native teardown defect could log dashboard.parked while KWin still
+owned an undrawn Sidecar window. That window could become unresponsive even though
+the tray/control channel answered. The reviewed eframe patch drains deferred
+window retirement before the application parks. A SIGABRT/core with no Rust panic
+can reflect an externally requested abort; inspect the signal origin and actual
+window state rather than assuming a renderer panic or GPU reset.
+
+After updating, native_window_active must become false and no native Sidecar
+window should remain while parked. Closing through the CLI alone is not sufficient
+to certify title-bar behavior. The explicit regression is
+`python3 tests/wayland_window_lifecycle.py --live --cycles 6`; it refuses an existing
+real dashboard, uses private fixture names/data and controls only its owned
+windows via short-lived KWin scripts. It requires Plasma Wayland/qdbus6 and journal
+access; no KWin settings or user service state are changed.
+
+Keep core dumps and machine-specific diagnostics private. Diagnostic collection
+should filter exact process IDs/components; do not publish complete user journals,
+application memory or environment dumps. Third-party patch changes must pass
+`python3 tests/verify_vendor.py`; see [provenance](../vendor/README.md).
+
+## Set up normal iGPU launches
+
+Use **Applications → Add app → Use iGPU**, then close/reopen the app normally when
+ready. No profile name, test session, special shortcut or app login-startup setting
+is required. The wrapper can start the installed collector user service on demand;
+check that igpu-man.service is installed and not masked if launch fails. The
+Sidecar window need not stay open. Existing single-instance browsers keep their
+old settings until closed; unknown Firefox instances are refused with a fixed
+local notification. An uncoordinated collector restart can lose registration.
+
+The app card separates its saved shortcut from measured rendering/video activity.
+Use the app; play a video for decoder evidence. Waiting, missing accounting and
+stale collection are not success or proof of software decoding. **Details → Check shortcut**
+checks file state; **Undo** restores originals and removes unchanged auto-created
+settings. Existing profiles/recordings are preserved. A timeout is uncertain: check
+state before retrying. Use Finish setup for interrupted preparation, or repeat Undo
+for an undoing phase. Keep the private recovery journal; do not delete it to clear
+an error. Conflicting external edits are preserved and require local review.
+
+Direct commands, alternate desktop IDs, app-owned startup or some restored
+sessions can bypass a launcher. An ID-based pin follows the override; if an old
+pin points directly at the packaged file, re-pin from the application menu.
+Desktop action submenus are omitted and restored by Undo. Underlying-launcher
+warnings after package updates need Undo/review/reapply. Native launcher matches
+are suggested; custom workflows and detailed inspection remain in Launch Settings or the CLI.
+
+## Remove an earlier version's app login changes
+
+Use **Remove previous login changes** on that app, or
+`igpu-man profile remove-login PROFILE`. This keeps normal iGPU routing while
+restoring the prior startup entries and removing only Sidecar-added exclusions.
+It never disables unrelated startup settings or changes Sidecar's own tray startup.
+A removing_login phase can be retried; a conflict retains all recovery data and
+outside edits. New setup rejects login:true and CLI --login is removed.
+
+Custom profiles are in **Launch Settings**. Recordings remain accessible through
+the CLI with data intact; the installed dashboard does not poll their catalog.
+
+
+## GPU activity names and hidden diagnostics
+
+Usage, power, temperature and charts are the main readings. Expand **Device
+details** for PCI/render paths, the reported raw device name, label source and
+other sensors; **Collection & display details** contains coverage and KWin output.
+Missing/permission/stale states remain distinct, with partial-coverage warnings
+visible even when details are closed. Auto-scale retains a labeled axis per GPU.
+
+Friendly names use kernel product metadata or an exact device/revision entry in
+`/usr/share/libdrm/amdgpu.ids`. Missing iGPU names can use host CPU context (for
+example Ryzen 7 9800X3D graphics); this is not a claim of an exact GPU model. Missing
+optional metadata falls back to the diagnostic description. Database/CPU metadata
+is read once per collector lifetime. If package updates change those names,
+refresh through a safe collector restart/guarded developer update when no recording
+is active. Display labels do not alter PCI routing, saved profiles or recordings.
+
+
+## Dashboard navigation
+
+The only tabs are **Applications**, **GPU Activity** and **Launch Settings**.
+Applications is the default. **More → Edit profile** and **Open profile editor** in
+Launch Settings reveal the form; rendering/recording options, Steam commands and
+custom normal routing remain expandable. New setup never starts apps at login.
+
+The Advanced menu and the placement/recording pages have been removed from the
+installed dashboard. Existing recordings are preserved: use `igpu-man record list`,
+`show`, `notes`, `import`, `compare` or `export`. Use `igpu-man record stop` if a
+recording-enabled profile is capturing. CLI/API compatibility does not restore the
+removed tabs. Prior screenshots/captures of retired views are validation artifacts.
+
+For developer updater validation use `dbus-run-session -- python3 tests/update_user.py`.
+The harness also self-isolates when invoked directly; existing service owners cause
+an immediate refusal. A ready API is insufficient evidence of fixture ownership:
+the helper checks its collector peer PID before mutations. Do not bypass those
+checks to run a test against the installed service.
+
+
+Applications now uses compact, full-width rows. Normal-launch intent is shown under
+the app name; Rendering and Video decoding describe measured activity separately.
+Hover those readings for waiting/unavailable/stale guidance. Details contains the
+launcher identity and Check shortcut; Undo and recovery/conflict warnings remain
+visible. Narrow windows wrap activity onto a second line rather than hiding it.
+
+
+Launch Settings uses compact full-width profile rows. The target GPU remains
+visible on wide/narrow layouts; full executable paths and normal-launch ownership
+are in More. Edit/Delete stay disabled for a managed profile until its routing is
+undone. The editor and saved settings are unchanged; expanding the form does not
+launch or move an app. Launch buttons use the requested target GPU's color.
+
+
+## Launcher conflicts and dashboard work admission
+
+Creating a separate launcher in Launch Settings or `igpu-man profile launcher`
+never replaces an existing file or symlink. A conflict preserves it; inspect the
+existing shortcut locally before deciding to remove it or use another profile
+name. Ordinary iGPU routing and profiles are unaffected. After a request timeout,
+check for the shortcut before retrying: the writer may have completed publication.
+Parent-directory sync warnings mean publication happened but crash durability is
+uncertain, not that the shortcut was rolled back.
+
+“Sidecar is busy; this action was not queued” means the bounded dashboard work
+queue rejected that action before dispatch. Wait for current work, then retry
+explicitly. `dashboard.action_rejected` records only the operation/reason.
+`dashboard.worker_unavailable` means the worker stopped; restart the dashboard
+and inspect logs. Close/Quit use a separate control path and remain available.
+
+Integration fixtures refuse occupied Sidecar/user-manager session buses. Run them
+with `dbus-run-session -- python3 tests/<fixture>.py`. Do not weaken the guard or
+stop the installed collector to make a fixture run. Live read-only checks have an
+explicit mode and do not use synthetic recording/config mutations.
+
+
+## Source-free per-user removal
+
+First undo managed routes while the CLI still exists, quit Sidecar, disable its
+tray autostart entry and stop/disable `igpu-man.service` as described in
+[setup](setup.md#uninstall). For the default manual user prefix, these are the
+installed program assets; they exclude private config/data/state:
+
+```sh
+rm -f "$HOME/.local/bin/igpu-man" "$HOME/.local/bin/igpu-mand" "$HOME/.local/bin/igpu-man-desktop"
+rm -f "$HOME/.local/share/systemd/user/igpu-man.service" "$HOME/.local/share/applications/igpu-man.desktop"
+rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/igpu-man.svg" "$HOME/.local/share/licenses/igpu-man/LICENSE"
+rm -rf -- "$HOME/.local/share/doc/igpu-man"
+systemctl --user daemon-reload
+```
+
+Use the matching prefix if you installed elsewhere. Do not use manual removal for
+pacman-owned files. Saved profiles, recordings and recovery journals remain until
+you explicitly delete them; keep the journal if any routing Undo is unresolved.

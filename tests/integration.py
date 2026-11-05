@@ -4,6 +4,7 @@
 Run after cargo build: dbus-run-session -- python3 tests/integration.py
 Never starts/stops/enables the installed user service or changes GPU settings.
 """
+from fixture_bus import require_empty, require_collector
 import json
 import os
 import re
@@ -17,11 +18,15 @@ BIN = Path(os.environ.get("IGPU_MAN_BIN_DIR", ROOT / "target/debug"))
 
 
 def main():
+    require_empty()
     with tempfile.TemporaryDirectory(prefix="igpu-man-integration-") as temporary:
         root = Path(temporary)
         environment = dict(os.environ, XDG_STATE_HOME=str(root / "state"), XDG_CONFIG_HOME=str(root / "config"),
                            XDG_DATA_HOME=str(root / "data"), XDG_DATA_DIRS=str(root / "system"),
                            QT_QPA_PLATFORM="offscreen")
+        config = root / "config/igpu-man/config.toml"
+        config.parent.mkdir(parents=True)
+        config.write_text('schema_version=1\n[[profiles]]\nname="shortcut"\nexecutable="/usr/bin/true"\ngpu="0000:00:02.0"\n')
         daemon = None
 
         def cli(*args, success=True):
@@ -43,6 +48,7 @@ def main():
                 result = subprocess.run([str(BIN / "igpu-man"), "status", "--json"],
                                         env=environment, text=True, capture_output=True, timeout=5)
                 if result.returncode == 0:
+                    require_collector(process)
                     return process
                 if process.poll() is not None:
                     raise AssertionError(process.stderr.read())
@@ -54,6 +60,32 @@ def main():
             daemon = start()
             snapshot = json.loads(cli("status", "--json").stdout)
             assert snapshot["api_version"] == 1
+            # Launcher publication works without a GPU and never follows or
+            # replaces an existing destination, even on an explicit retry.
+            saved = json.loads(cli("profile", "list").stdout)
+            shortcut = root / "data/applications/igpu-man-shortcut.desktop"
+            for invalid in (
+                {"name":"shortcut", "cli_path":"relative"},
+                {"name":"shortcut", "cli_path":str(BIN / "igpu-man"), "unexpected":True},
+                {"name":"shortcut"},
+            ):
+                assert raw_request("create_launcher", json.dumps(invalid)).returncode != 0
+                assert not shortcut.exists()
+            cli("profile", "launcher", "shortcut")
+            content = shortcut.read_bytes()
+            cli("profile", "launcher", "shortcut", success=False)
+            assert shortcut.read_bytes() == content
+            shortcut.unlink()
+            target = root / "user-owned"
+            target.write_text("preserve this file")
+            shortcut.symlink_to(target)
+            cli("profile", "launcher", "shortcut", success=False)
+            assert shortcut.is_symlink() and target.read_text() == "preserve this file"
+            assert json.loads(cli("profile", "list").stdout) == saved
+            shortcut.unlink()
+            cli("profile", "launcher", "missing", success=False)
+            assert not shortcut.exists()
+            cli("profile", "delete", "shortcut")
             # Management rules are executable identities and survive daemon restarts.
             cli("manage", "/tmp/workflow-owned-emulator", "--elsewhere")
             assert "managed_elsewhere" in (root / "config/igpu-man/config.toml").read_text()
@@ -116,7 +148,7 @@ def main():
             assert fallback.returncode==0 and '"event":"process.started"' in fallback.stderr
             if snapshot["gpus"]:
                 pci = snapshot["gpus"][0]["pci"]
-                applications = root / "data/applications"; applications.mkdir(parents=True)
+                applications = root / "data/applications"; applications.mkdir(parents=True, exist_ok=True)
                 helper = root / "fixture-report"
                 helper.write_text("#!/usr/bin/python3\nimport json,os,sys\nprint(json.dumps({'args':sys.argv[1:],'value':os.environ['IGPU_MAN_TEST_VALUE'],'prime':os.environ['DRI_PRIME'],'cwd':os.getcwd()}))\n")
                 helper.chmod(0o700)

@@ -54,14 +54,44 @@ pub(super) fn start_trial(
     profile.verification = None;
     let keep_name = profile.name.clone();
     profile.name = format!("trial-{}", monotonic_ns());
+    let payload = serde_json::to_vec(&profile)?;
+    anyhow::ensure!(payload.len() <= 1024 * 1024, "Trial profile exceeds 1 MiB");
     let mut child = Command::new(cli_path())
         .arg("try-profile")
-        .arg(serde_json::to_string(&profile)?)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .context("Could not start the trial wrapper")?;
+    // Close the pipe before inspecting identity: the wrapper waits for EOF and
+    // cannot launch from a partial profile. No profile data appears in argv.
+    use std::io::Write;
+    let sent = child
+        .stdin
+        .take()
+        .context("Trial input pipe missing")
+        .and_then(|mut pipe| {
+            pipe.write_all(&payload)
+                .context("Could not send trial settings")
+        });
+    if let Err(error) = sent {
+        // Only this owned, not-yet-launched wrapper can be terminated here.
+        if let Err(cleanup) = child.kill() {
+            igpu_core::logging::event(
+                "warn",
+                "trial.wrapper_kill_failed",
+                igpu_core::logging::error_fields(&cleanup.into()),
+            );
+        }
+        if let Err(cleanup) = child.wait() {
+            igpu_core::logging::event(
+                "warn",
+                "trial.wrapper_reap_failed",
+                igpu_core::logging::error_fields(&cleanup.into()),
+            );
+        }
+        return Err(error);
+    }
     let process = match igpu_core::collector::read_process_stat(
         &Path::new("/proc").join(child.id().to_string()).join("stat"),
         child.id(),
@@ -151,7 +181,7 @@ impl Dashboard {
         let Ok(stage) = std::env::var("IGPU_MAN_SCREENSHOT_WORKFLOW") else {
             return;
         };
-        self.tab = 1;
+        self.tab = 4;
         if stage == "catalog" {
             self.browse_launchers = true;
         }
@@ -296,14 +326,19 @@ impl Dashboard {
             .iter()
             .find(|g| g.integrated)
             .map(|g| g.pci.clone());
-        ui.heading("Find work to move to the iGPU");
+        theme::page_title(
+            ui,
+            "Placement experiments",
+            "Try a fresh launch, inspect its GPU activity, then keep the settings if they work.",
+        );
         if trial.is_none() && !pending {
             let recoverable = self.backend.lock().unwrap().pending_trials.clone();
             for registration in recoverable {
                 let Some(profile) = registration.profile else {
                     continue;
                 };
-                ui.group(|ui| {
+                theme::card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                     ui.label(format!("Unkept launch: {}",profile.desktop.as_ref().map(|d|d.name.as_str()).unwrap_or(&profile.executable)));
                     ui.small("Resume with fresh verification, or discard its setup while leaving the app running.");
                     ui.horizontal(|ui| {
@@ -319,7 +354,8 @@ impl Dashboard {
         }
         let notice = self.backend.lock().unwrap().workflow_notice.clone();
         if !notice.is_empty() {
-            ui.group(|ui| {
+            theme::card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
                 ui.colored_label(theme::IGPU, &notice);
                 ui.horizontal(|ui| {
                     if ui.button("View profiles").clicked() {
@@ -331,7 +367,7 @@ impl Dashboard {
                 });
             });
         }
-        ui.label("Ranked by measured dGPU engine activity over the last minute. More activity makes an app worth testing; it does not predict an FPS improvement.");
+        theme::muted(ui, "Candidates are ranked by recent dGPU activity. Treat this as a test list, not a prediction of gaming gains.");
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add(theme::action("Add installed application…", theme::DGPU))
@@ -353,20 +389,31 @@ impl Dashboard {
         }
         let can_start = target.is_some() && !stale && !pending && trial.is_none();
         if self.browse_launchers {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Installed applications"); ui.text_edit_singleline(&mut self.launcher_search);
-                    if ui.button("Refresh").clicked() { let _ = self.sender.send(Action::RefreshLaunchers); }
-                });
+            theme::card().show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                theme::section_title(ui, "Choose an installed app");
+                ui.add(egui::TextEdit::singleline(&mut self.launcher_search).hint_text("Search installed apps…").desired_width(f32::INFINITY));
+                if ui.button("Refresh apps").clicked() { self.queue(Action::RefreshLaunchers); }
                 let query = self.launcher_search.to_lowercase();
                 egui::ScrollArea::vertical().id_salt("launcher-catalog").max_height(220.0).show(ui, |ui| {
                     for entry in entries.iter().filter(|e| format!("{} {}", e.name, e.id).to_lowercase().contains(&query)) {
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.add_enabled(can_start && entry.profile.is_some(), theme::action("Try on iGPU", theme::IGPU)).clicked() {
-                                self.setup_from_launcher(entry, &profiles, target.as_deref().unwrap());
-                            }
-                            ui.strong(&entry.name); ui.small(&entry.id);
-                            if let Some(problem) = &entry.problem { ui.label(problem); }
+                        ui.push_id(&entry.id, |ui| {
+                            egui::Frame::new().inner_margin(egui::Margin::symmetric(0, 8)).show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.set_width((ui.available_width() - 130.0).max(100.0));
+                                        ui.strong(&entry.name).on_hover_text(&entry.id);
+                                        if let Some(problem) = &entry.problem { theme::muted(ui, problem); }
+                                    });
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        if ui.add_enabled(can_start && entry.profile.is_some(), theme::action("Try on iGPU", theme::IGPU)).clicked() {
+                                            self.setup_from_launcher(entry, &profiles, target.as_deref().unwrap());
+                                        }
+                                    });
+                                });
+                            });
+                            ui.separator();
                         });
                     }
                     if entries.is_empty() { ui.label("No installed launchers loaded. Refresh after the collector connects."); }
@@ -387,19 +434,38 @@ impl Dashboard {
                     ))
             })
             .collect();
-        egui::Grid::new("candidate-list").num_columns(5).spacing([18.0, 12.0]).striped(true).show(ui, |ui| {
-            for title in ["Application / placement", "dGPU graphics", "dGPU video", "dGPU observation", "Actions"] { ui.strong(title); } ui.end_row();
-            for candidate in visible {
-                    ui.vertical(|ui| {
-                        ui.set_max_width(360.0);
-                        ui.strong(&candidate.name).on_hover_text(&candidate.executable);
+        for candidate in visible {
+            ui.push_id((candidate.process.pid, candidate.process.start_ticks), |ui| {
+                theme::card().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width((ui.available_width() - 160.0).max(100.0));
+                            theme::section_title(ui, &candidate.name);
                         let igpu = snapshot.gpus.iter().any(|g| g.integrated && candidate.observed_gpus.contains(&g.pci));
                         let dgpu = snapshot.gpus.iter().any(|g| !g.integrated && candidate.observed_gpus.contains(&g.pci));
                         let placement = match (igpu,dgpu) { (true,true) => "Both GPUs active", (true,false) => "iGPU active", (false,true) => "dGPU active", _ => "No current measured activity" };
                         let mismatch = candidate.saved_target.as_ref().and_then(|gpu| launch::resolve_gpu(&snapshot.gpus, gpu).ok()).is_some_and(|gpu| candidate.observed_gpus.iter().any(|p| p != &gpu.pci));
                         let color = if mismatch || (igpu && dgpu) { theme::WARNING } else if igpu { theme::IGPU } else if dgpu { theme::DGPU } else { theme::MUTED };
                         theme::badge(ui, if mismatch { if candidate.launch_path.registration.is_some() { "Placement mismatch" } else { "Activity differs from profile" } } else { placement }, color);
-                        if let Some(profile) = &candidate.profile { ui.small(format!("Saved: {profile}")); }
+
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add_enabled(can_start, theme::action("Try on iGPU", theme::IGPU)).clicked() {
+                                self.setup_from_candidate(candidate, snapshot, &entries, &profiles, target.as_deref().unwrap());
+                            }
+                        });
+                    });
+                    ui.add_space(8.0);
+                    ui.columns(3, |columns| {
+                        theme::muted(&mut columns[0], "dGPU graphics");
+                        columns[0].label(egui::RichText::new(percent(candidate.graphics_percent)).size(20.0).color(theme::DGPU)).on_hover_text(&candidate.source);
+                        theme::muted(&mut columns[1], "dGPU video");
+                        columns[1].label(egui::RichText::new(percent(candidate.video_percent)).size(20.0).color(theme::DGPU)).on_hover_text("Video includes decode/encode activity; it does not identify a particular stream.");
+                        theme::muted(&mut columns[2], "Observation");
+                        columns[2].label(egui::RichText::new(format!("{:.0}s / {:.0}s", candidate.active_seconds, candidate.observed_seconds)).size(20.0).color(theme::MUTED)).on_hover_text("Active time / observed time on the dGPU in the last minute.");
+                    });
+                    ui.add_space(6.0);
                         let path = &candidate.launch_path;
                         let color = if path.kind == LaunchKind::Unregistered && !path.matching_profiles.is_empty() { theme::WARNING } else { theme::MUTED };
                         ui.label(egui::RichText::new(path.kind.label()).color(color)).on_hover_text(&path.explanation);
@@ -407,7 +473,9 @@ impl Dashboard {
                             .id_salt((candidate.process.pid, candidate.process.start_ticks))
                             .default_open(cfg!(feature = "screenshot") && std::env::var("IGPU_MAN_SCREENSHOT_WORKFLOW").as_deref() == Ok("audit") && !path.matching_profiles.is_empty())
                             .show(ui, |ui| {
-                            ui.label(&path.explanation);
+                            theme::muted(ui, &path.explanation);
+                            ui.small(format!("Other dGPU engines: {}", percent(candidate.other_percent)));
+                            if let Some(profile) = &candidate.profile { ui.small(format!("Saved profile: {profile}")); }
                             if let Some(profile) = &path.registered_profile { ui.label(format!("Registered settings: {profile}")); }
                             if let Some(id) = &path.registration { ui.small(format!("Registered root: PID {} · start {} (descendants retain attribution)", id.pid, id.start_ticks)); }
                             if !path.matching_profiles.is_empty() {
@@ -421,33 +489,25 @@ impl Dashboard {
                                 }
                                 ui.small("Close the old instance normally before relaunching. Use the separate Sidecar launcher if created, and pin that entry for future launches. No running app is moved or terminated.");
                             } else if path.kind == LaunchKind::Unregistered {
-                                ui.small("No exact executable match. A profile may start a wrapper; choose the intended profile manually in Profiles.");
+                                ui.small("No exact executable match. A profile may start a wrapper; choose the intended profile manually in Launch settings.");
                             }
-                            if ui.button("Open Profiles").clicked() { self.tab = 2; }
+                            if ui.button("Open launch settings").clicked() { self.tab = 2; }
                         });
-                    });
-                    ui.label(egui::RichText::new(percent(candidate.graphics_percent)).monospace().strong().color(if candidate.graphics_percent.is_some_and(|v| v > 0.0) { theme::DGPU } else { theme::MUTED })).on_hover_text(&candidate.source);
-                    ui.label(egui::RichText::new(percent(candidate.video_percent)).monospace().strong().color(if candidate.video_percent.is_some_and(|v| v > 0.0) { theme::DGPU } else { theme::MUTED })).on_hover_text("Video includes decode/encode engine activity where exposed; it is not proof that a particular stream uses hardware decoding.");
-                    ui.vertical(|ui| {
-                        ui.label(format!("{:.1}s active / {:.1}s observed", candidate.active_seconds, candidate.observed_seconds));
-                        ui.small(format!("Other engines: {}", percent(candidate.other_percent)));
-                    });
-                    ui.vertical(|ui| {
-                        if ui.add_enabled(can_start, theme::action("Try on iGPU", theme::IGPU)).clicked() {
-                            self.setup_from_candidate(candidate, snapshot, &entries, &profiles, target.as_deref().unwrap());
-                        }
-                        if ui.add_enabled(!stale, egui::Button::new("Managed elsewhere")).clicked() {
-                            self.rpc("set_management", json!({"executable": candidate.executable, "managed_elsewhere": true}));
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add_enabled(!stale, egui::Button::new(egui::RichText::new("Managed elsewhere").small().color(theme::MUTED)).frame(false)).clicked() {
+                            self.rpc("set_management", json!({"executable":candidate.executable,"managed_elsewhere":true}));
                         }
                     });
-                    ui.end_row();
-            }
-        });
+                });
+            });
+            ui.add_space(10.0);
+        }
         if candidates
             .iter()
             .all(|c| c.management != Management::Candidate)
         {
-            ui.label("No unmanaged dGPU activity candidates in the current observation window. Idle or inaccessible clients can be shown above.");
+            theme::muted(ui, "No unmanaged dGPU candidates in this observation window. Enable idle / unmeasured apps to inspect additional clients.");
         }
         ui.collapsing(format!("Managed elsewhere ({})", rules.len()), |ui| {
             ui.label("Excluded from candidate ranking across restarts. Existing profiles and application settings are preserved.");
@@ -465,7 +525,7 @@ impl Dashboard {
         });
         ui.add_space(12.0);
         if let Some(trial) = trial {
-            self.trial_verification(ui, trial, &profiles, stale);
+            self.trial_verification(ui, trial, &profiles, stale, snapshot);
         } else if !pending {
             self.trial_editor(ui, snapshot, &entries, &profiles, stale);
         }
@@ -483,13 +543,16 @@ impl Dashboard {
         profiles: &[Profile],
         stale: bool,
     ) {
+        let mut launch_action = None;
         let Some(setup) = &mut self.trial_setup else {
             return;
         };
         let mut cancel = false;
-        let panel = ui.group(|ui| {
-            ui.heading("1 · Review and try on iGPU");
-            ui.label("Close the existing application normally before launching this test. No application is terminated automatically.");
+        let panel = theme::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new("STEP 1 · REVIEW").size(11.0).color(theme::IGPU));
+            theme::section_title(ui, "Try a fresh launch");
+            theme::muted(ui, "Close the existing app normally before testing. Sidecar leaves running apps alone.");
             let mut selected = setup.selected_launcher.clone();
             egui::ComboBox::from_id_salt("trial-import").width(360.0).selected_text(setup.profile.desktop.as_ref().map(|d| d.name.as_str()).unwrap_or("Manual executable / choose installed launcher"))
                 .show_ui(ui, |ui| {
@@ -534,15 +597,15 @@ impl Dashboard {
             ui.horizontal(|ui| {
                 if ui.add_enabled(valid && !stale && !previous_live, theme::action("Launch test", theme::IGPU)).clicked() {
                     self.backend.lock().unwrap().trial_pending = true;
-                    if self.sender.send(Action::StartTrial { profile: Box::new(setup.profile.clone()), previous: setup.previous.clone() }).is_err() {
-                        let mut state=self.backend.lock().unwrap();state.trial_pending=false;state.error="The background worker stopped; restart the dashboard and inspect its logs.".into();
-                        igpu_core::logging::event("error","dashboard.worker_unavailable",json!({"operation":"start_trial"}));
-                    }
+                    launch_action = Some(Action::StartTrial { profile: Box::new(setup.profile.clone()), previous: setup.previous.clone() });
                 }
                 if previous_live { ui.label("Waiting for the existing application to close…"); }
                 if ui.button("Cancel setup").clicked() { cancel = true; }
             });
         });
+        if let Some(action) = launch_action {
+            self.queue(action);
+        }
         if self.scroll_to_trial {
             ui.scroll_to_rect(panel.response.rect, Some(egui::Align::TOP));
             self.scroll_to_trial = false;
@@ -558,12 +621,15 @@ impl Dashboard {
         mut trial: Trial,
         profiles: &[Profile],
         stale: bool,
+        snapshot: &Snapshot,
     ) {
         let mut discard = false;
         let keeping = self.backend.lock().unwrap().trial_keep_pending;
-        let panel = ui.group(|ui| {
-            ui.heading("2 · Verify placement");
-            ui.label(format!("Testing {} on {}. Use the app; play a video if decoder verification matters.", trial.profile.desktop.as_ref().map(|d| d.name.as_str()).unwrap_or(&trial.profile.executable), trial.profile.gpu));
+        let panel = theme::card().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new("STEP 2 · VERIFY").size(11.0).color(theme::IGPU));
+            theme::section_title(ui, "Observe rendering and decoding");
+            ui.label(format!("Testing {} on {}. Use the app; play a video if decoder verification matters.", trial.profile.desktop.as_ref().map(|d| d.name.as_str()).unwrap_or(&trial.profile.executable), theme::gpu_label(&snapshot.gpus, &trial.profile.gpu)));
             if let Some(verification) = &trial.verification {
                 egui::Grid::new("trial-placement").num_columns(2).show(ui, |ui| {
                     for (label,state) in [("Rendering", verification.rendering), ("Video decoding", verification.decoding), ("Other engines", verification.other_engines)] {
@@ -575,7 +641,9 @@ impl Dashboard {
                     if let Some(exit) = &trial.launcher_exit { ui.colored_label(theme::WARNING, format!("Launcher exited ({exit}). No verified application is currently tracked. It may have reused an existing instance.")); }
                 }
             } else { ui.label("Waiting for fresh collector verification…"); }
-            ui.add_space(8.0); ui.heading("3 · Keep");
+            ui.add_space(8.0); ui.separator();
+            ui.label(egui::RichText::new("STEP 3 · KEEP").size(11.0).color(theme::IGPU));
+            theme::section_title(ui, "Save the tested settings");
             ui.horizontal(|ui| { ui.label("Profile name"); ui.text_edit_singleline(&mut trial.keep_name); });
             let create_launcher = self.trial_setup.as_mut().map(|s| {
                 ui.checkbox(&mut s.create_launcher, "Create a separate Plasma launcher"); s.create_launcher
@@ -592,7 +660,7 @@ impl Dashboard {
                 if ui.add_enabled(!keeping, egui::Button::new("Discard setup")).clicked() { discard = true; }
                 if keeping { ui.spinner(); ui.label("Saving profile…"); }
             });
-            ui.small("Keep saves the tested configuration. Pin its generated launcher in Plasma for future launches. Discard leaves the running application alone.");
+            ui.small("Keep saves a custom profile. Use Applications to set up ordinary iGPU launches. Discard leaves the running app alone.");
         });
         if self.scroll_to_trial {
             ui.scroll_to_rect(panel.response.rect, Some(egui::Align::TOP));

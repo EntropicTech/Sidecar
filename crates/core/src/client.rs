@@ -87,3 +87,47 @@ pub fn recording_timeline(value: &serde_json::Value) -> Result<crate::model::Rec
         frames: frames.into_iter().map(Into::into).collect(),
     })
 }
+
+/// Fixed local notification: never expose the command, URL or RPC error payload.
+pub fn notify_launch_failure() -> Result<()> {
+    let connection = zbus::blocking::connection::Builder::session()?
+        .method_timeout(std::time::Duration::from_secs(2))
+        .build()?;
+    let proxy = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.Notifications",
+        "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications",
+    )?;
+    let hints = std::collections::HashMap::<String, zbus::zvariant::Value<'_>>::new();
+    let _:u32 = proxy.call("Notify", &("Sidecar",0u32,"igpu-man","Managed application could not start","An existing instance or launch configuration needs attention. Open Sidecar → Profiles and check normal-launch settings. Close existing instances normally before changing GPUs.",Vec::<String>::new(),hints,10000i32))?;
+    Ok(())
+}
+
+/// Only explicit managed launches request this fixed user unit. Never activate
+/// or fall back to another bus: isolated tests must not reach the real manager.
+pub fn start_collector_service() -> Result<()> {
+    let connection = zbus::blocking::connection::Builder::session()?
+        .method_timeout(std::time::Duration::from_secs(2))
+        .build()?;
+    let bus = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+    )?;
+    let exists: bool = bus.call("NameHasOwner", &("org.freedesktop.systemd1",))?;
+    anyhow::ensure!(
+        exists,
+        "No systemd user manager on this session bus; start the collector manually"
+    );
+    let manager = zbus::blocking::Proxy::new(
+        &connection,
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+    )?;
+    let _: zbus::zvariant::OwnedObjectPath =
+        manager.call("StartUnit", &("igpu-man.service", "fail"))?;
+    Ok(())
+}

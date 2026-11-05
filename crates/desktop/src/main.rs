@@ -12,12 +12,20 @@ use std::{
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
+mod action_queue;
+mod app_home;
 mod applications_ui;
 mod backend;
 mod branding;
+mod gpu_activity;
 mod graphs;
 mod lifecycle;
+mod navigation;
+mod normal_launch_ui;
+mod profiles_ui;
+mod recording_notes;
 mod recording_worker;
+mod recordings_ui;
 mod resident;
 mod worker_health;
 use backend::{backend_failure, backend_recovered, Backend};
@@ -29,10 +37,9 @@ enum Action {
     Show,
     ShowApplications,
     Close,
-    Mark,
     Quit,
     RefreshLaunchers,
-    TrialKept,
+    TrialKept(Box<Profile>),
     TrayChanged,
     VisibilityChanged,
     StartTrial {
@@ -42,7 +49,6 @@ enum Action {
 }
 
 struct Tray {
-    sender: mpsc::Sender<Action>,
     control: lifecycle::Control,
     icons: Vec<ksni::Icon>,
     available: Arc<std::sync::atomic::AtomicBool>,
@@ -78,7 +84,7 @@ impl ksni::Tray for Tray {
         "igpu-man".into()
     }
     fn title(&self) -> String {
-        "Sidecar · GPU workload manager".into()
+        "Sidecar · Apps on the iGPU".into()
     }
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         self.icons.clone()
@@ -86,7 +92,7 @@ impl ksni::Tray for Tray {
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
             title: branding::NAME.into(),
-            description: "GPU placement and recordings".into(),
+            description: "Choose an app once. Open it normally on the iGPU.".into(),
             ..Default::default()
         }
     }
@@ -97,22 +103,6 @@ impl ksni::Tray for Tray {
                 label: "Open dashboard".into(),
                 activate: Box::new(|tray: &mut Self| {
                     tray.control.send(Action::Show);
-                }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: "Stutter happened — capture".into(),
-                activate: Box::new(|tray: &mut Self| {
-                    let _ = tray.sender.send(Action::Mark);
-                }),
-                ..Default::default()
-            }
-            .into(),
-            StandardItem {
-                label: "Stop recording".into(),
-                activate: Box::new(|tray: &mut Self| {
-                    let _ = tray.sender.send(Action::Rpc("stop", json!({})));
                 }),
                 ..Default::default()
             }
@@ -135,7 +125,7 @@ impl ksni::Tray for Tray {
 
 struct Dashboard {
     backend: Arc<Mutex<Backend>>,
-    sender: mpsc::Sender<Action>,
+    sender: mpsc::SyncSender<Action>,
     telemetry_health: worker_health::Health,
     recording_health: worker_health::Health,
     recording_sender: mpsc::SyncSender<recording_worker::Job>,
@@ -150,6 +140,9 @@ struct Dashboard {
     browse_launchers: bool,
     show_inactive_apps: bool,
     profile_extras: Option<Profile>,
+    normal_setup: Option<normal_launch_ui::Editor>,
+    app_setup: Option<String>,
+    worker_view: Arc<std::sync::atomic::AtomicUsize>,
     scroll_to_trial: bool,
     name: String,
     executable: String,
@@ -161,7 +154,7 @@ struct Dashboard {
     mangohud: bool,
     recording_label: String,
     selected: Vec<i64>,
-    notes: String,
+    notes: recording_notes::Drafts,
     export_path: String,
     import_path: String,
     import_anchor: String,
@@ -198,6 +191,7 @@ impl Dashboard {
                 }
                 initial.candidates = client::call("candidates", &json!({})).unwrap_or_default();
                 initial.launchers = client::call("launchers", &json!({})).unwrap_or_default();
+                initial.launcher_matches = backend::launcher_matches(&initial.launchers);
                 initial.managed_elsewhere =
                     client::call("management", &json!({})).unwrap_or_default();
                 if let Ok(recordings) = client::call("recordings", &json!({})) {
@@ -224,15 +218,16 @@ impl Dashboard {
         let (recording_sender, recording_health) =
             recording_worker::spawn(backend.clone(), control.clone());
         let recording_poll = recording_sender.clone();
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = action_queue::channel();
         let ui_sender = control.sender();
         let shared = backend.clone();
         let context = control.clone();
         let visible_flag = Arc::new(std::sync::atomic::AtomicBool::new(visible));
         let worker_visible = visible_flag.clone();
+        let worker_view = Arc::new(std::sync::atomic::AtomicUsize::new(1));
+        let observed_view = worker_view.clone();
         let tray_available = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let tray_flag = tray_available.clone();
-        let tray_sender = sender.clone();
         let tray_control = control.clone();
         let tray_visible = visible_flag.clone();
         let watcher_seen = Arc::new(Mutex::new(false));
@@ -257,7 +252,6 @@ impl Dashboard {
             runtime.block_on(async move {
                 let tray_control_notification = tray_control.clone();
                 match (Tray {
-                    sender: tray_sender,
                     control: tray_control,
                     icons,
                     available: tray_flag.clone(),
@@ -298,6 +292,7 @@ impl Dashboard {
             }
             let mut refreshed = Instant::now() - Duration::from_secs(10);
             let mut launchers_loaded = false;
+            let mut normal_loaded = false;
             loop {
                 // Parked workers have no periodic timer. The native window
                 // owner sends a visibility event on both attach and teardown.
@@ -310,28 +305,103 @@ impl Dashboard {
                 };
                 context.telemetry_woke();
                 match event {
-                    Ok(Action::VisibilityChanged) => {}
+                    Ok(Action::VisibilityChanged) => {
+                        if worker_visible.load(std::sync::atomic::Ordering::Acquire) {
+                            normal_loaded = false;
+                        }
+                    }
                     Ok(Action::Rpc(method, value)) => {
+                        let verify_process =
+                            serde_json::from_value::<ProcessId>(value["process"].clone()).ok();
                         let result = client::call::<Value>(method, &value);
 
                         let mut state = shared.lock().unwrap();
+                        if method.starts_with("normal_launch_") || method.starts_with("app_route_")
+                        {
+                            state.normal_busy = false;
+                        }
                         if method == "keep_trial" {
                             state.trial_keep_pending = false;
                         }
                         match result {
                             Ok(value) => {
+                                if method == "verify_trial" {
+                                    if let (Some(process), Ok(verification)) =
+                                        (verify_process, serde_json::from_value(value.clone()))
+                                    {
+                                        state.normal_verification = Some((process, verification));
+                                    }
+                                }
+                                if method == "app_route_preview" {
+                                    match serde_json::from_value(value.clone()) {
+                                        Ok(preview) => state.app_preview = Some(preview),
+                                        Err(error) => {
+                                            state.error = format!("App setup unavailable: {error}");
+                                            context.request_repaint();
+                                            continue;
+                                        }
+                                    }
+                                } else if method == "normal_launch_preview" {
+                                    match serde_json::from_value(value.clone()) {
+                                        Ok(preview) => state.normal_preview = Some(preview),
+                                        Err(error) => {
+                                            state.error =
+                                                format!("Invalid normal-launch preview: {error}");
+                                            context.request_repaint();
+                                            continue;
+                                        }
+                                    }
+                                } else if method.starts_with("normal_launch_")
+                                    || method.starts_with("app_route_")
+                                {
+                                    match serde_json::from_value(value.clone()) {
+                                        Ok(status) => {
+                                            state.normal_status = status;
+                                            state.normal_checked = Some(Instant::now());
+                                        }
+                                        Err(error) => {
+                                            state.error =
+                                                format!("Invalid normal-launch status: {error}");
+                                            context.request_repaint();
+                                            continue;
+                                        }
+                                    }
+                                    if method != "normal_launch_status" {
+                                        state.normal_preview = None;
+                                        state.app_preview = None;
+                                        launchers_loaded = false;
+                                        state.workflow_notice = if method == "normal_launch_undo" {
+                                            "Normal-launch changes undone. Existing applications were left running.".into()
+                                        } else {
+                                            "Ready. Open the app using its usual shortcut. If it is already running, close and reopen it when ready.".into()
+                                        };
+                                    }
+                                }
                                 if method == "keep_trial" {
-                                    state.trial = None;
-                                    state.workflow_notice = value["launcher_path"].as_str().map(|path| format!("Profile kept. A separate Plasma launcher is ready: {path}. Find it in the application menu and pin it for future launches."))
-                                        .unwrap_or_else(|| "Profile kept. Launch it from Profiles for future iGPU launches.".into());
+                                    let kept = state.trial.take().map(|trial| {
+                                        let mut profile = trial.profile;
+                                        profile.name = trial.keep_name;
+                                        profile
+                                    });
+                                    state.workflow_notice = value["launcher_path"].as_str().map(|path| format!("Profile kept. A separate launcher is ready: {path}. Use Applications for ordinary iGPU launches, or Launch Settings for custom routing."))
+                                        .unwrap_or_else(|| "Profile kept. Use Applications for ordinary iGPU launches, or Launch Settings for custom routing.".into());
                                     if let Some(warning) = value["launcher_warning"].as_str() {
                                         state.workflow_notice.push(' ');
                                         state.workflow_notice.push_str(warning);
                                     }
-                                    let _ = ui_sender.send(Action::TrialKept);
+                                    if let Some(profile) = kept {
+                                        let _ =
+                                            ui_sender.send(Action::TrialKept(Box::new(profile)));
+                                    }
+                                }
+                                if method == "create_launcher" {
+                                    state.result = "Desktop launcher created".into();
                                 }
                                 if method == "discard_trial" {
                                     state.trial = None;
+                                }
+                                if method == "normal_launch_status" {
+                                    backend_recovered(&mut state, "normal launches");
                                 }
                                 if method == "set_management" {
                                     state.managed_elsewhere =
@@ -348,6 +418,13 @@ impl Dashboard {
                                 state.error.clear();
                             }
                             Err(e) => {
+                                if method.starts_with("normal_launch_")
+                                    || method.starts_with("app_route_")
+                                {
+                                    state.normal_preview = None;
+                                    state.app_preview = None;
+                                    normal_loaded = false;
+                                }
                                 igpu_core::logging::event(
                                     "warn",
                                     "dashboard.action_failed",
@@ -358,19 +435,6 @@ impl Dashboard {
                         }
 
                         refreshed = Instant::now() - Duration::from_secs(10);
-                    }
-                    Ok(Action::Mark) => {
-                        if recording_poll
-                            .try_send(recording_worker::Job::Request {
-                                method: Operation::Mark,
-                                value: json!({"label":"stutter happened"}),
-                                generation: 0,
-                            })
-                            .is_err()
-                        {
-                            shared.lock().unwrap().error =
-                                "Recording operations busy; marker was not queued.".into();
-                        }
                     }
                     Ok(Action::RefreshLaunchers) => {
                         launchers_loaded = false;
@@ -423,7 +487,7 @@ impl Dashboard {
                         | Action::ShowApplications
                         | Action::Close
                         | Action::Quit
-                        | Action::TrialKept
+                        | Action::TrialKept(_)
                         | Action::TrayChanged),
                     ) => {
                         let _ = ui_sender.send(action);
@@ -445,10 +509,32 @@ impl Dashboard {
                             backend_failure(&mut state, "candidates", &error);
                         }
                     }
+                    if !normal_loaded {
+                        match client::call("normal_launch_status", &json!({})) {
+                            Ok(status) => {
+                                let mut state = shared.lock().unwrap();
+                                state.normal_status = status;
+                                state.normal_checked = Some(Instant::now());
+                                normal_loaded = true;
+                            }
+                            Err(error) => {
+                                backend_failure(
+                                    &mut shared.lock().unwrap(),
+                                    "normal launches",
+                                    &error,
+                                );
+                                normal_loaded = true;
+                            }
+                        }
+                    }
                     if !launchers_loaded {
-                        match client::call("launchers", &json!({})) {
+                        match client::call::<Vec<igpu_core::launchers::InstalledLauncher>>(
+                            "launchers",
+                            &json!({}),
+                        ) {
                             Ok(launchers) => {
                                 let mut state = shared.lock().unwrap();
+                                state.launcher_matches = backend::launcher_matches(&launchers);
                                 state.launchers = launchers;
                                 backend_recovered(&mut state, "launchers");
                                 launchers_loaded = true;
@@ -515,7 +601,11 @@ impl Dashboard {
                             backend_failure(&mut shared.lock().unwrap(), "profiles", &error);
                         }
                     }
-                    let _ = recording_poll.try_send(recording_worker::Job::Poll); // Coalesced polling; skip if user jobs occupy the bounded queue.
+                    if cfg!(feature = "screenshot")
+                        && observed_view.load(std::sync::atomic::Ordering::Relaxed) == 3
+                    {
+                        let _ = recording_poll.try_send(recording_worker::Job::Poll);
+                    } // Retired recording view is used only by compatibility fixtures.
                     match client::call("management", &json!({})) {
                         Ok(rules) => {
                             let mut state = shared.lock().unwrap();
@@ -526,16 +616,18 @@ impl Dashboard {
                             backend_failure(&mut shared.lock().unwrap(), "management", &error);
                         }
                     }
-                    match client::call("pending_trials", &json!({})) {
-                        Ok(trials) => {
-                            let mut state = shared.lock().unwrap();
-                            state.pending_trials = trials;
-                            backend_recovered(&mut state, "pending trials");
-                        }
-                        Err(error) => {
-                            let mut state = shared.lock().unwrap();
-                            state.pending_trials.clear();
-                            backend_failure(&mut state, "pending trials", &error);
+                    if cfg!(feature = "screenshot") {
+                        match client::call("pending_trials", &json!({})) {
+                            Ok(trials) => {
+                                let mut state = shared.lock().unwrap();
+                                state.pending_trials = trials;
+                                backend_recovered(&mut state, "pending trials");
+                            }
+                            Err(error) => {
+                                let mut state = shared.lock().unwrap();
+                                state.pending_trials.clear();
+                                backend_failure(&mut state, "pending trials", &error);
+                            }
                         }
                     }
                     refreshed = Instant::now();
@@ -557,10 +649,10 @@ impl Dashboard {
                 std::env::var("IGPU_MAN_SCREENSHOT_TAB")
                     .ok()
                     .and_then(|v| v.parse::<usize>().ok())
-                    .unwrap_or(0)
-                    .min(3)
+                    .unwrap_or(1)
+                    .min(4)
             } else {
-                usize::from(std::env::args().any(|a| a == "--applications"))
+                1
             },
             history: BTreeMap::new(),
             last_sample: 0,
@@ -570,6 +662,9 @@ impl Dashboard {
             browse_launchers: false,
             show_inactive_apps: false,
             profile_extras: None,
+            normal_setup: None,
+            app_setup: None,
+            worker_view,
             scroll_to_trial: false,
             name: String::new(),
             executable: "firefox".into(),
@@ -581,7 +676,7 @@ impl Dashboard {
             mangohud: false,
             recording_label: "browser-idle".into(),
             selected: Vec::new(),
-            notes: String::new(),
+            notes: recording_notes::Drafts::default(),
             export_path: String::new(),
             import_path: String::new(),
             import_anchor: String::new(),
@@ -601,10 +696,17 @@ impl Dashboard {
         #[cfg(feature = "screenshot")]
         dashboard.initialize_screenshot_workflow();
         #[cfg(feature = "screenshot")]
+        dashboard.initialize_normal_screenshot();
+        #[cfg(feature = "screenshot")]
+        dashboard.initialize_app_home_screenshot();
+        #[cfg(feature = "screenshot")]
+        dashboard.initialize_profiles_screenshot();
+        #[cfg(feature = "screenshot")]
         if let Some(id) = std::env::var("IGPU_MAN_SCREENSHOT_RECORDING_ID")
             .ok()
             .and_then(|s| s.parse::<i64>().ok())
         {
+            dashboard.selected = vec![id];
             dashboard.rpc("detail", json!({"id":id}));
         }
         #[cfg(feature = "screenshot")]
@@ -680,182 +782,12 @@ impl Dashboard {
             }
             return;
         }
-        if self.sender.send(Action::Rpc(method, value)).is_err() {
-            self.backend.lock().unwrap().error =
-                "The background worker stopped; restart the dashboard and inspect its logs.".into();
-            igpu_core::logging::event(
-                "error",
-                "dashboard.worker_unavailable",
-                json!({"operation":method}),
-            );
-        }
+        self.queue(Action::Rpc(method, value));
     }
-    fn overview(&mut self, ui: &mut egui::Ui, snapshot: &Snapshot) {
-        ui.heading("Know where your GPU work lands");
-        ui.label("Requested placement, observed activity, and measured game performance are separate facts.");
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Live chart scale");
-            ui.selectable_value(&mut self.auto_scale_graphs, false, "Fixed 0–100%");
-            ui.selectable_value(&mut self.auto_scale_graphs, true, "Auto-scale")
-                .on_hover_text("Each GPU uses its own zero-based scale for the visible two-minute history, including peaks. This changes only the chart axis.");
-        });
-        if self.auto_scale_graphs {
-            ui.label(egui::RichText::new("Auto-scale is independent per GPU. Compare the percentage readings and labeled axes, rather than line heights.").small().color(theme::MUTED));
-        }
-        ui.add_space(12.0);
-        ui.columns(snapshot.gpus.len().clamp(1, 2), |columns| {
-            for (index, gpu) in snapshot.gpus.iter().enumerate() {
-                let count = columns.len();
-                let ui = &mut columns[index % count];
-                let color = theme::gpu_color(gpu);
-                egui::Frame::new()
-                    .fill(theme::SURFACE)
-                    .stroke(egui::Stroke::new(1.0_f32, theme::BORDER))
-                    .corner_radius(10)
-                    .inner_margin(14)
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        let (bar, _) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), 3.0),
-                            egui::Sense::hover(),
-                        );
-                        ui.painter().rect_filled(bar, 2.0, color);
-                        ui.horizontal(|ui| {
-                            let title = match gpu.alias.as_str() {
-                                "igpu" => "iGPU",
-                                "dgpu" => "dGPU",
-                                other => other,
-                            };
-                            ui.heading(egui::RichText::new(title).color(color));
-                            theme::badge(
-                                ui,
-                                if gpu.integrated {
-                                    "Integrated GPU"
-                                } else {
-                                    "Dedicated GPU"
-                                },
-                                color,
-                            );
-                        });
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(ui.available_width(), 34.0),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                ui.set_min_height(34.0);
-                                ui.small(&gpu.name);
-                            },
-                        );
-                        ui.label(
-                            egui::RichText::new(&gpu.pci)
-                                .monospace()
-                                .color(theme::MUTED),
-                        );
-                        if let Some(node) = &gpu.render_node {
-                            ui.label(egui::RichText::new(node).small().color(theme::MUTED));
-                        }
-                        ui.add_space(4.0);
-                        ui.columns(3, |stats| {
-                            for (i, (key, title)) in [
-                                ("gpu_busy", "GPU busy"),
-                                ("power", "Power"),
-                                ("temperature", "Temperature"),
-                            ]
-                            .iter()
-                            .enumerate()
-                            {
-                                stats[i]
-                                    .label(egui::RichText::new(*title).small().color(theme::MUTED));
-                                if let Some(metric) = gpu.metrics.get(*key) {
-                                    stats[i]
-                                        .label(
-                                            egui::RichText::new(if metric.value.is_some() {
-                                                metric_text(metric)
-                                            } else {
-                                                "—".into()
-                                            })
-                                            .size(if i == 0 { 28.0 } else { 22.0 })
-                                            .strong()
-                                            .color(
-                                                theme::metric_color(
-                                                    metric,
-                                                    if i == 0 { color } else { theme::TEXT },
-                                                ),
-                                            ),
-                                        )
-                                        .on_hover_text(format!(
-                                            "Source: {}\nStatus: {:?}",
-                                            metric.source, metric.status
-                                        ));
-                                    if metric.value.is_none() {
-                                        stats[i].label(
-                                            egui::RichText::new(metric_text(metric))
-                                                .small()
-                                                .color(theme::MUTED),
-                                        );
-                                    }
-                                } else {
-                                    stats[i].label(
-                                        egui::RichText::new("—").size(22.0).color(theme::MUTED),
-                                    );
-                                }
-                            }
-                        });
-                        let empty = VecDeque::new();
-                        chart(
-                            ui,
-                            self.history.get(&gpu.pci).unwrap_or(&empty),
-                            color,
-                            snapshot.monotonic_ns,
-                            self.auto_scale_graphs,
-                        );
-                        for (name, metric) in &gpu.metrics {
-                            if !["gpu_busy", "power", "temperature"].contains(&name.as_str()) {
-                                metric_row(ui, name, metric);
-                            }
-                        }
-                        for output in gpu.outputs.iter().filter(|o| o.connected) {
-                            ui.separator();
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "{} · {} · {} Hz · scale {}",
-                                    output.connector,
-                                    output
-                                        .current_mode
-                                        .as_deref()
-                                        .unwrap_or("current mode unavailable"),
-                                    output
-                                        .refresh_hz
-                                        .map(|n| format!("{n:.2}"))
-                                        .unwrap_or_else(|| "—".into()),
-                                    output
-                                        .scale
-                                        .map(|n| format!("{n:.2}"))
-                                        .unwrap_or_else(|| "—".into())
-                                ))
-                                .color(color),
-                            );
-                        }
-                    });
-            }
-        });
-        if snapshot.gpus.is_empty() {
-            ui.label("No accessible AMD DRM devices found. Run igpu-man doctor for details.");
-        }
-        ui.add_space(12.0);
-        ui.heading("Collection health");
-        ui.label(format!("{} accessible user processes · {} unique DRM clients · {} permission failures · {:.2} ms per sample",
-            snapshot.coverage.processes_inspected, snapshot.coverage.clients_observed, snapshot.coverage.permission_denied, snapshot.collector_duration_ms));
-        for note in &snapshot.diagnostics.notes {
-            ui.small(note);
-        }
-        for recommendation in &snapshot.recommendations {
-            ui.colored_label(theme::WARNING, recommendation);
-        }
-        ui.collapsing("KWin and display diagnostics", |ui| {
-            ui.label("Transfers between GPUs are not directly measured. Monitor attachment does not prove application rendering placement.");
-            ui.monospace(snapshot.diagnostics.kwin_support.as_deref().unwrap_or("KWin diagnostics unavailable"));
-        });
+    fn queue(&self, action: Action) -> bool {
+        action_queue::submit(&self.sender, action, &mut self.backend.lock().unwrap())
     }
+
     fn application_details(&self, ui: &mut egui::Ui, snapshot: &Snapshot) {
         ui.heading("Detailed application metrics");
         ui.label("Engine percentages measure time active, not share of GPU performance. Shared clients are counted once; client memory is not a device total.");
@@ -884,345 +816,6 @@ impl Dashboard {
             "Watch CPU activity and note visible playback drops in your recording notes.",
             "Missing decoder activity does not prove software decoding. Playback drops are not automatically measured in this release."] { ui.label(format!("• {item}")); }
     }
-    fn profiles(&mut self, ui: &mut egui::Ui, profiles: &[Profile], snapshot: Option<&Snapshot>) {
-        ui.heading("Explicit launch profiles");
-        ui.label("Profiles apply when an application starts. Running applications keep their existing settings.");
-        for profile in profiles {
-            ui.horizontal_wrapped(|ui| {
-                ui.strong(&profile.name); ui.label(format!("{} to {}", profile.executable, profile.gpu));
-                if ui.button("Edit").clicked() {
-                    self.profile_extras = Some(profile.clone());
-                    self.name = profile.name.clone(); self.executable = profile.executable.clone(); self.args = profile.args.clone();
-                    self.gpu = profile.gpu.clone(); self.firefox = profile.firefox; self.vulkan_only = profile.vulkan_only;
-                    self.record = profile.record; self.mangohud = profile.mangohud;
-                }
-                if ui.add(theme::action("Launch", theme::IGPU)).clicked() {
-                    let result = if (profile.firefox || launch::is_firefox(&profile.executable)) && launch::firefox_running(std::path::Path::new("/proc"), std::process::id()) {
-                        Err("Firefox is already running. Fully exit it before launching a different GPU profile.".into())
-                    } else { launch_cli(&["launch", &profile.name]) };
-                    if let Err(e) = result { self.backend.lock().unwrap().error = e; }
-                }
-                if ui.button("Create launcher").clicked() {
-                    let result = (|| -> anyhow::Result<()> {
-                        let paths = Paths::discover()?; std::fs::create_dir_all(&paths.applications)?;
-                        let cli = cli_path();
-                        std::fs::write(paths.applications.join(format!("igpu-man-{}.desktop", profile.name)), launch::desktop_entry(profile, &cli)?)?;
-                        Ok(())
-                    })();
-                    let mut backend = self.backend.lock().unwrap();
-                    match result { Ok(()) => backend.result = "Desktop launcher created".into(), Err(e) => backend.error = format!("{e:#}") }
-                }
-                if ui.button("Delete profile").clicked() { self.rpc("delete_profile", json!({"name": profile.name})); }
-            });
-        }
-        ui.separator();
-        egui::Grid::new("profile-editor")
-            .num_columns(2)
-            .spacing([16.0, 8.0])
-            .show(ui, |ui| {
-                ui.label("Profile name");
-                ui.text_edit_singleline(&mut self.name);
-                ui.end_row();
-                ui.label("Executable");
-                ui.text_edit_singleline(&mut self.executable);
-                ui.end_row();
-                ui.label("Arguments");
-                ui.vertical(|ui| {
-                    let mut remove = None;
-                    for (index, argument) in self.args.iter_mut().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.push_id(index, |ui| {
-                                ui.text_edit_singleline(argument);
-                            });
-                            if ui.button("Remove").clicked() {
-                                remove = Some(index);
-                            }
-                        });
-                    }
-                    if let Some(index) = remove {
-                        self.args.remove(index);
-                    }
-                    if ui.button("Add argument").clicked() {
-                        self.args.push(String::new());
-                    }
-                });
-                ui.end_row();
-                ui.label("GPU");
-                egui::ComboBox::from_id_salt("target-gpu")
-                    .selected_text(&self.gpu)
-                    .show_ui(ui, |ui| {
-                        if let Some(snapshot) = snapshot {
-                            for gpu in &snapshot.gpus {
-                                ui.selectable_value(
-                                    &mut self.gpu,
-                                    gpu.pci.clone(),
-                                    format!("{} · {}", gpu.alias, gpu.pci),
-                                );
-                            }
-                        }
-                    });
-                ui.end_row();
-            });
-        ui.checkbox(
-            &mut self.firefox,
-            "Firefox adapter (explicit render device; requires fresh launch)",
-        );
-        ui.checkbox(&mut self.vulkan_only, "Expose only the selected Vulkan GPU");
-        ui.checkbox(
-            &mut self.record,
-            "Start a telemetry recording with this launch",
-        );
-        ui.add_enabled_ui(self.record, |ui| {
-            ui.checkbox(
-                &mut self.mangohud,
-                "MangoHud frame log (first 120 seconds, native games; no gamescope)",
-            );
-        });
-        if !self.record {
-            self.mangohud = false;
-        }
-        if ui.add(theme::action("Save profile", theme::DGPU)).clicked() {
-            let profile = Profile {
-                name: self.name.clone(),
-                executable: self.executable.clone(),
-                args: self.args.clone(),
-                gpu: self.gpu.clone(),
-                firefox: self.firefox,
-                vulkan_only: self.vulkan_only,
-                record: self.record,
-                mangohud: self.mangohud,
-                ..self.profile_extras.clone().unwrap_or_default()
-            };
-            self.rpc("save_profile", serde_json::to_value(profile).unwrap());
-        }
-        if let Some(snapshot) = snapshot {
-            for gpu in &snapshot.gpus {
-                ui.horizontal(|ui| {
-                    ui.label(format!("Steam · {}", gpu.alias));
-                    if ui.button("Copy launch command").clicked() {
-                        ui.ctx().copy_text(launch::steam_command(gpu));
-                    }
-                });
-            }
-        }
-    }
-    fn recordings(&mut self, ui: &mut egui::Ui, recordings: &[Recording]) {
-        ui.heading("Recordings and experiments");
-        if self.backend.lock().unwrap().recording_busy {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label("Recording work in progress; live monitoring continues.");
-            });
-        }
-        ui.label("Use the same scene, video, and settings for each run. Label repeated runs with the same condition to compare their variation.");
-        ui.horizontal_wrapped(|ui| {
-            ui.text_edit_singleline(&mut self.recording_label);
-            if ui
-                .add(theme::action("Start recording", theme::MARKER))
-                .clicked()
-            {
-                self.rpc("start", json!({"label": self.recording_label}));
-            }
-            if ui
-                .add(theme::action("Stop recording", theme::WARNING))
-                .clicked()
-            {
-                self.rpc("stop", json!({}));
-            }
-            if ui
-                .add(theme::action("Mark stutter", theme::WARNING))
-                .clicked()
-            {
-                self.rpc("mark", json!({"label": "stutter happened"}));
-            }
-            if ui.button("Experiment schedule").clicked() {
-                self.rpc("experiment", json!({}));
-            }
-        });
-        for recording in recordings {
-            ui.horizontal_wrapped(|ui| {
-                let mut selected = self.selected.contains(&recording.id);
-                if ui
-                    .checkbox(
-                        &mut selected,
-                        format!(
-                            "#{} {} · {} · {} samples",
-                            recording.id, recording.label, recording.state, recording.samples
-                        ),
-                    )
-                    .changed()
-                {
-                    self.selected.retain(|&id| id != recording.id);
-                    if selected {
-                        self.selected.push(recording.id);
-                    }
-                }
-                if ui.button("Inspect").clicked() {
-                    self.notes = recording.notes.clone();
-                    self.rpc("detail", json!({"id": recording.id}));
-                }
-                if ui.button("Delete…").clicked() {
-                    self.pending_delete = Some(recording.id);
-                }
-            });
-        }
-        if let Some(id) = self.pending_delete {
-            ui.horizontal(|ui| {
-                ui.colored_label(
-                    theme::WARNING,
-                    format!("Permanently delete recording #{id}?"),
-                );
-                if ui.add(theme::action("Delete", theme::DANGER)).clicked() {
-                    self.rpc("delete_recording", json!({"id": id}));
-                    self.selected.retain(|&n| n != id);
-                    self.pending_delete = None;
-                }
-                if ui.button("Cancel").clicked() {
-                    self.pending_delete = None;
-                }
-            });
-        }
-        if self.selected.len() >= 2
-            && ui
-                .add(theme::action("Compare selected recordings", theme::DGPU))
-                .clicked()
-        {
-            self.rpc("compare", json!({"ids": self.selected}));
-        }
-        if self.selected.len() == 1 {
-            let id = self.selected[0];
-            ui.separator();
-            ui.label(format!("Selected recording #{id}"));
-            ui.label("Playback quality / experiment notes");
-            ui.text_edit_multiline(&mut self.notes);
-            if ui.button("Save notes").clicked() {
-                self.rpc("notes", json!({"id": id, "notes": self.notes}));
-            }
-            ui.horizontal(|ui| {
-                ui.label("Export to new absolute directory");
-                ui.text_edit_singleline(&mut self.export_path);
-            });
-            if ui.button("Export bundle").clicked() {
-                self.rpc("export", json!({"id": id, "destination": self.export_path}));
-            }
-            ui.horizontal(|ui| {
-                ui.label("MangoHud CSV path");
-                ui.text_edit_singleline(&mut self.import_path);
-            });
-            ui.horizontal(|ui| {
-                ui.label("Optional elapsed=0 monotonic anchor (ns)");
-                ui.text_edit_singleline(&mut self.import_anchor);
-            });
-            if ui.button("Import frame log").clicked() {
-                let anchor = if self.import_anchor.trim().is_empty() {
-                    Ok(None)
-                } else {
-                    self.import_anchor.parse::<u64>().map(Some)
-                };
-                match anchor {
-                    Ok(anchor) => {
-                        if self
-                            .recording_sender
-                            .try_send(recording_worker::Job::Import {
-                                id,
-                                path: self.import_path.clone().into(),
-                                anchor,
-                            })
-                            .is_err()
-                        {
-                            self.backend.lock().unwrap().error =
-                                "Recording operations busy; retry after completion.".into();
-                        }
-                    }
-                    Err(_) => {
-                        self.backend.lock().unwrap().error =
-                            "Alignment anchor must be an unsigned integer.".into()
-                    }
-                }
-            }
-        }
-        let (detail, comparison, samples, frames) = {
-            let backend = self.backend.lock().unwrap();
-            (
-                backend.detail.clone(),
-                backend.comparison.clone(),
-                backend.samples.clone(),
-                backend.frames.clone(),
-            )
-        };
-        if let Some(detail) = detail {
-            ui.separator();
-            ui.heading(format!(
-                "Recording #{} · {}",
-                detail["recording"]["id"],
-                detail["recording"]["label"].as_str().unwrap_or("")
-            ));
-            if let Some(logs) = detail["frame_logs"].as_array() {
-                if !logs.is_empty() {
-                    ui.small("Frametime trace shows bucket maxima; statistics use every frame.");
-                }
-                for log in logs {
-                    ui.label(format!(
-                        "{} · {}",
-                        log["filename"].as_str().unwrap_or("frame log"),
-                        if log["aligned"].as_bool() == Some(true) {
-                            "estimated alignment; see uncertainty"
-                        } else {
-                            "unaligned — summary only"
-                        }
-                    ));
-                    summary_table(ui, &log["summary"], &format!("summary-{}", log["filename"]));
-                }
-            }
-            let markers: Vec<Marker> =
-                serde_json::from_value(detail["recording"]["markers"].clone()).unwrap_or_default();
-            timeline(ui, &samples, &frames, &markers);
-        }
-        if let Some(comparison) = comparison {
-            ui.separator();
-            ui.heading("Comparison");
-            if let Some(warnings) = comparison["mismatch_warnings"].as_array() {
-                for warning in warnings {
-                    ui.colored_label(
-                        theme::WARNING,
-                        warning.as_str().unwrap_or("Metadata mismatch"),
-                    );
-                }
-            }
-            if let Some(recordings) = comparison["recordings"].as_array() {
-                for recording in recordings {
-                    ui.strong(format!(
-                        "#{} {}",
-                        recording["recording"]["id"],
-                        recording["recording"]["label"].as_str().unwrap_or("")
-                    ));
-                    if let Some(logs) = recording["frame_logs"].as_array() {
-                        for (index, log) in logs.iter().enumerate() {
-                            summary_table(
-                                ui,
-                                &log["summary"],
-                                &format!("comparison-{}-{index}", recording["recording"]["id"]),
-                            );
-                        }
-                    }
-                }
-            }
-            ui.label("Run-to-run variation by condition (min–max)");
-            if let Some(conditions) = comparison["run_variation_by_label"].as_object() {
-                for (label, range) in conditions {
-                    ui.label(format!(
-                        "{label} · {} runs · average FPS {:.1}–{:.1} · p99 {:.2}–{:.2} ms",
-                        range["runs"],
-                        range["average_fps_range"]["min"].as_f64().unwrap_or(0.0),
-                        range["average_fps_range"]["max"].as_f64().unwrap_or(0.0),
-                        range["p99_ms_range"]["min"].as_f64().unwrap_or(0.0),
-                        range["p99_ms_range"]["max"].as_f64().unwrap_or(0.0)
-                    ));
-                }
-            }
-            ui.small("Observed differences are not a causal finding or a statistical significance claim. Check playback-quality notes and metadata.");
-        }
-    }
 }
 
 impl eframe::App for Dashboard {
@@ -1245,12 +838,22 @@ impl eframe::App for Dashboard {
 }
 impl Dashboard {
     fn update_inner(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.tab = navigation::normalize(self.tab, cfg!(feature = "screenshot"));
         if ctx.input(|i| i.viewport().close_requested()) && !self.quitting && !self.closing {
             self.control.hide_requested();
             self.closing = true;
             igpu_core::logging::event("info", "dashboard.window_close_requested", json!({}));
         }
         self.control.selected_view(self.tab);
+        if self
+            .worker_view
+            .swap(self.tab, std::sync::atomic::Ordering::Relaxed)
+            != self.tab
+            && cfg!(feature = "screenshot")
+            && self.tab == 3
+        {
+            let _ = self.recording_sender.try_send(recording_worker::Job::Poll);
+        }
         let unhealthy = self.backend.is_poisoned()
             || self.telemetry_health.failed()
             || self.recording_health.failed();
@@ -1305,8 +908,10 @@ impl Dashboard {
         self.capture_frame(ctx);
         while let Ok(event) = self.ui_events.try_recv() {
             match event {
-                Action::TrialKept => {
+                Action::TrialKept(profile) => {
                     self.trial_setup = None;
+                    self.begin_normal_setup(&profile);
+                    self.tab = 2;
                 }
                 action @ (Action::Show | Action::ShowApplications) => {
                     self.control.show_requested();
@@ -1403,67 +1008,116 @@ impl Dashboard {
                 }
             }
         }
-        egui::TopBottomPanel::top("top").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let (indicator, _) =
-                    ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                ui.painter()
-                    .circle_filled(indicator.center(), 4.0, theme::IGPU);
-                ui.heading(
-                    egui::RichText::new(branding::NAME)
-                        .color(theme::TEXT)
-                        .strong(),
-                );
-                ui.label(egui::RichText::new("GPU workload manager").color(theme::MUTED));
-                if stale {
-                    theme::badge(ui, "Disconnected / stale", theme::WARNING);
-                } else {
-                    theme::badge(ui, "Collector connected", theme::IGPU);
-                }
-                if let Some(id) = snapshot.as_ref().and_then(|s| s.active_recording) {
-                    theme::badge(ui, &format!("● Recording #{id}"), theme::MARKER);
-                }
-            });
-            ui.horizontal(|ui| {
-                for (index, name) in ["Overview", "Applications", "Profiles", "Recordings"]
-                    .iter()
-                    .enumerate()
-                {
-                    ui.selectable_value(&mut self.tab, index, *name);
-                }
-            });
-        });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                if !error.is_empty() {
-                    ui.colored_label(theme::DANGER, &error);
-                }
-                match self.tab {
-                    0 => {
-                        if let Some(snapshot) = &snapshot {
-                            self.overview(ui, snapshot);
-                        } else {
-                            ui.label(
-                                "Start the collector: systemctl --user start igpu-man.service",
-                            );
-                        }
+        egui::TopBottomPanel::top("top")
+            .frame(
+                egui::Frame::new()
+                    .fill(theme::PANEL)
+                    .inner_margin(egui::Margin::symmetric(22, 12)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let (indicator, _) =
+                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter()
+                        .circle_filled(indicator.center(), 4.0, theme::IGPU);
+                    ui.heading(
+                        egui::RichText::new(branding::NAME)
+                            .color(theme::TEXT)
+                            .strong(),
+                    );
+                    ui.add_space(4.0);
+                    if let Some(id) = snapshot.as_ref().and_then(|s| s.active_recording) {
+                        theme::badge(ui, &format!("Recording #{id}"), theme::MARKER);
                     }
-                    1 => {
-                        if let Some(snapshot) = &snapshot {
-                            self.applications(ui, snapshot);
-                        }
-                    }
-                    2 => self.profiles(ui, &profiles, snapshot.as_deref()),
-                    _ => self.recordings(ui, &recordings),
-                }
-                if !result.is_empty() {
-                    ui.separator();
-                    ui.collapsing("Last operation / comparison result", |ui| {
-                        ui.monospace(&result);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(if stale {
+                                "Disconnected / stale"
+                            } else {
+                                "Collector connected"
+                            })
+                            .small()
+                            .color(if stale {
+                                theme::WARNING
+                            } else {
+                                theme::MUTED
+                            }),
+                        );
+                        let (indicator, _) =
+                            ui.allocate_exact_size(egui::vec2(7.0, 7.0), egui::Sense::hover());
+                        ui.painter().circle_filled(
+                            indicator.center(),
+                            3.0,
+                            if stale { theme::WARNING } else { theme::MUTED },
+                        );
                     });
-                }
+                });
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    for (index, name) in navigation::TABS {
+                        ui.selectable_value(&mut self.tab, index, name);
+                    }
+                });
             });
-        });
+        egui::CentralPanel::default()
+            .frame(egui::Frame::central_panel(&ctx.style()).fill(theme::BACKGROUND))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    if !error.is_empty() {
+                        ui.colored_label(theme::DANGER, &error);
+                    }
+                    match self.tab {
+                        0 => {
+                            if let Some(snapshot) = &snapshot {
+                                self.overview(ui, snapshot, stale);
+                            } else {
+                                ui.label(
+                                    "Start the collector: systemctl --user start igpu-man.service",
+                                );
+                            }
+                        }
+                        1 => {
+                            if let Some(snapshot) = &snapshot {
+                                let inset = 16.0;
+                                let width = (ui.available_width() - inset * 2.0).max(0.0);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(inset);
+                                    ui.allocate_ui_with_layout(
+                                        egui::vec2(width, 0.0),
+                                        egui::Layout::top_down(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_width(width);
+                                            self.app_home(ui, snapshot, &profiles, stale);
+                                        },
+                                    );
+                                });
+                            }
+                        }
+                        2 => theme::full_width_page(ui, |ui| {
+                            self.profiles(ui, &profiles, snapshot.as_deref())
+                        }),
+                        // Compatibility UI is compiled out of optimized runtime paths.
+                        4 if cfg!(feature = "screenshot") => {
+                            if let Some(snapshot) = &snapshot {
+                                theme::page(ui, 960.0, |ui| self.applications(ui, snapshot));
+                            }
+                        }
+                        3 if cfg!(feature = "screenshot") => {
+                            theme::page(ui, 1040.0, |ui| self.recordings(ui, &recordings))
+                        }
+                        _ => {
+                            self.tab = 1;
+                            ctx.request_repaint();
+                        }
+                    }
+                    if self.tab >= 2 && !result.is_empty() {
+                        ui.separator();
+                        ui.collapsing("Last operation details", |ui| {
+                            ui.monospace(&result);
+                        });
+                    }
+                });
+            });
     }
 }
 
@@ -1504,30 +1158,6 @@ fn metric_text(metric: &Metric) -> String {
             }
         ),
     }
-}
-fn summary_table(ui: &mut egui::Ui, summary: &Value, id: &str) {
-    egui::Grid::new(id).striped(true).show(ui, |ui| {
-        for label in [
-            "Frames",
-            "Average FPS",
-            "Median ms",
-            "p95 ms",
-            "p99 ms",
-            "Over threshold",
-        ] {
-            ui.strong(label);
-        }
-        ui.end_row();
-        ui.label(summary["frames"].to_string());
-        for field in ["average_fps", "median_ms", "p95_ms", "p99_ms"] {
-            ui.label(format!("{:.2}", summary[field].as_f64().unwrap_or(0.0)));
-        }
-        ui.label(format!(
-            "{} (> {} ms)",
-            summary["frames_over_threshold"], summary["threshold_ms"]
-        ));
-        ui.end_row();
-    });
 }
 fn timeline(
     ui: &mut egui::Ui,
@@ -1705,17 +1335,22 @@ fn chart(
 ) {
     let ceiling = graphs::utilization_ceiling(values, now, auto);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("GPU utilization").strong());
-        theme::badge(
-            ui,
-            &format!(
-                "{} · 0–{}%",
-                if auto { "Auto" } else { "Fixed" },
-                graphs::tick_label(ceiling)
-            ),
-            color,
+        ui.label(
+            egui::RichText::new("UTILIZATION")
+                .size(11.0)
+                .color(theme::MUTED),
         );
-        ui.label(egui::RichText::new("2 min").small().color(theme::MUTED));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(format!(
+                    "{} · 0–{}% · 2 min",
+                    if auto { "Auto" } else { "Fixed" },
+                    graphs::tick_label(ceiling)
+                ))
+                .small()
+                .color(color),
+            );
+        });
     });
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), 166.0),

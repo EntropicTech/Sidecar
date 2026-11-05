@@ -2,7 +2,7 @@
 Type=Application
 Name=Sidecar
 GenericName=GPU Workload Manager
-Comment=Observe GPU placement and compare gaming performance
+Comment=Open desktop apps normally on the iGPU and verify their GPU activity
 Exec=igpu-man-desktop
 Icon=igpu-man
 Terminal=false

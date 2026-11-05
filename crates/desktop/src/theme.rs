@@ -160,3 +160,133 @@ pub fn trace(
         ));
     }
 }
+
+/// Shared framing for secondary tools; layout only, with no background work.
+pub fn page(ui: &mut egui::Ui, width: f32, content: impl FnOnce(&mut egui::Ui)) {
+    let inset = ((ui.available_width() - width) / 2.0).max(12.0);
+    let width = (ui.available_width() - inset * 2.0).max(0.0);
+    ui.horizontal(|ui| {
+        ui.add_space(inset);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            ui.visuals_mut().override_text_color = Some(MUTED);
+            ui.add_space(12.0);
+            content(ui);
+            ui.add_space(12.0);
+        });
+    });
+}
+/// Compact main-page layout with the same gutter as Applications.
+pub fn full_width_page(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
+    let width = (ui.available_width() - 32.0).max(0.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            ui.visuals_mut().override_text_color = Some(MUTED);
+            ui.add_space(6.0);
+            content(ui);
+            ui.add_space(12.0);
+        });
+    });
+}
+pub fn card() -> egui::Frame {
+    egui::Frame::new()
+        .fill(PANEL)
+        .stroke(Stroke::new(1.0_f32, tint(BORDER, 150)))
+        .corner_radius(12)
+        .inner_margin(18)
+}
+pub fn page_title(ui: &mut egui::Ui, title: &str, description: &str) {
+    ui.label(RichText::new("ADVANCED").size(11.0).strong().color(MUTED));
+    ui.label(RichText::new(title).size(28.0).strong().color(TEXT));
+    muted(ui, description);
+    ui.add_space(14.0);
+}
+pub fn muted(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.label(RichText::new(text.into()).color(MUTED));
+}
+pub fn section_title(ui: &mut egui::Ui, title: &str) {
+    ui.label(RichText::new(title).size(18.0).strong().color(TEXT));
+}
+pub fn gpu_label(gpus: &[Gpu], target: &str) -> String {
+    gpus.iter()
+        .find(|g| g.pci == target || g.alias == target)
+        .map(|g| {
+            format!(
+                "{} · {}",
+                if g.integrated { "iGPU" } else { "dGPU" },
+                g.display_name.as_deref().unwrap_or(&g.name)
+            )
+        })
+        .unwrap_or_else(|| target.to_owned())
+}
+pub fn open_section(ctx: &egui::Context, id: egui::Id) {
+    let mut state =
+        egui::collapsing_header::CollapsingState::load_with_default_open(ctx, id, false);
+    state.set_open(true);
+    state.store(ctx);
+    ctx.request_repaint();
+}
+
+/// Explicit identity lets a menu open the same editor regardless of nesting.
+pub fn collapsible<R>(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    title: &str,
+    default_open: bool,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<egui::InnerResponse<R>> {
+    let state = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        id,
+        default_open,
+    );
+    let mut toggle = false;
+    let mut header = state.show_header(ui, |ui| {
+        toggle = ui.selectable_label(false, title).clicked();
+    });
+    if toggle {
+        header.toggle();
+    }
+    header.body(content).2
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::*;
+    #[test]
+    fn opening_an_editor_from_a_nested_menu_uses_its_parent_identity() {
+        let ctx = egui::Context::default();
+        for step in 0..3 {
+            let mut displayed = false;
+            let _ = ctx.run(
+                egui::RawInput {
+                    time: Some(step as f64),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let editor = ui.make_persistent_id("fixture-editor");
+                        if step == 1 {
+                            ui.push_id("nested-menu", |ui| open_section(ui.ctx(), editor));
+                        }
+                        displayed = collapsible(ui, editor, "Editor", false, |ui| {
+                            ui.label("Draft");
+                        })
+                        .is_some();
+                        assert_eq!(
+                            egui::collapsing_header::CollapsingState::load(ctx, editor)
+                                .unwrap()
+                                .is_open(),
+                            step > 0
+                        );
+                    });
+                },
+            );
+            if step == 2 {
+                assert!(displayed);
+            }
+        }
+    }
+}

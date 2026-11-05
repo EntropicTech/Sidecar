@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Cold --tray: no graphics/display needed, delayed host, idempotency and fallback."""
+from fixture_bus import require_empty
 import json,os,subprocess,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 BIN=Path(os.environ.get('IGPU_MAN_BIN_DIR',ROOT/'target/debug'))
 def main():
+ require_empty()
  with tempfile.TemporaryDirectory(prefix='sidecar-startup-') as temporary:
   env={k:v for k,v in os.environ.items() if not k.startswith('IGPU_MAN_SCREENSHOT_')}
   env.update(XDG_CONFIG_HOME=temporary+'/config',XDG_DATA_HOME=temporary+'/data',XDG_STATE_HOME=temporary+'/state')
@@ -15,6 +17,7 @@ def main():
    deadline=time.monotonic()+seconds
    while time.monotonic()<deadline:
     s=status()
+    if s.get("running"):assert s.get("pid")==child.pid,"Unexpected dashboard owner"
     if predicate(s):return s
     assert child.poll() is None, (child.returncode, Path(temporary+'/stderr').read_text()[-4000:], [(p.name,p.read_text()[-6000:]) for p in Path(temporary+'/state/igpu-man/logs').glob('desktop*.jsonl')])
     time.sleep(.04)

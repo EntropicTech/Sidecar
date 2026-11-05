@@ -4,6 +4,7 @@
 dbus-run-session -- python3 tests/placement_workflow.py
 Does not restart browsers, modify installed launchers, or change GPU settings.
 """
+from fixture_bus import require_empty, require_collector
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,7 @@ INTERFACE = "io.github.igpu_man.Collector1"
 
 
 def main():
+    require_empty()
     with tempfile.TemporaryDirectory(prefix="igpu-man-placement-") as temporary:
         root = Path(temporary)
         environment = dict(os.environ, XDG_STATE_HOME=str(root / "state"), XDG_CONFIG_HOME=str(root / "config"),
@@ -28,9 +30,9 @@ def main():
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         child = None
 
-        def cli(*args, success=True):
+        def cli(*args, success=True, input=None):
             result = subprocess.run([str(BIN / "igpu-man"), *args], env=environment,
-                                    text=True, capture_output=True, timeout=15)
+                                    input=input, text=True, capture_output=True, timeout=15)
             assert (result.returncode == 0) == success, (args, result.stderr)
             return result.stdout
 
@@ -48,7 +50,7 @@ def main():
             directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
             output = directory / f"{stage}.png"
             capture_env = dict(environment, IGPU_MAN_SCREENSHOT_WORKFLOW=stage,
-                               IGPU_MAN_SCREENSHOT_WAIT_MS="1500" if stage=="recover" else "0",
+                               IGPU_MAN_SCREENSHOT_WAIT_MS="1500",
                                IGPU_MAN_SCREENSHOT_TO=str(output), IGPU_MAN_SCREENSHOT_TRIAL=json.dumps(trial))
             subprocess.run([str(BIN / "igpu-man-desktop")], env=capture_env,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=20)
@@ -59,6 +61,7 @@ def main():
                 result = subprocess.run([str(BIN / "igpu-man"), "status", "--json"],
                                         env=environment, text=True, capture_output=True, timeout=5)
                 if result.returncode == 0:
+                    require_collector(daemon)
                     snapshot = json.loads(result.stdout)
                     break
                 time.sleep(.1)
@@ -81,8 +84,9 @@ def main():
             profile["gpu"] = igpu["pci"]
             capture("catalog")
             capture("setup")
-            child = subprocess.Popen([str(BIN / "igpu-man"), "try-profile", json.dumps(profile)],
-                                     env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            child = subprocess.Popen([str(BIN / "igpu-man"), "try-profile"],
+                                     env=environment, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            child.stdin.write(json.dumps(profile).encode()); child.stdin.close()
             fields = Path(f"/proc/{child.pid}/stat").read_text().rsplit(")", 1)[1].split()
             process = {"pid": child.pid, "start_ticks": int(fields[19])}
             keep = {"process": process, "name": "fixture-kept", "create_launcher": True,
@@ -117,7 +121,7 @@ def main():
             saved = json.loads(cli("profile", "list"))[0]
             assert saved["verification"]["rendering"] is True
             assert saved["verification"]["decoding"] is False
-            cli("try-profile", json.dumps(profile), success=False)  # Existing instance.
+            cli("try-profile", input=json.dumps(profile), success=False)  # Existing instance.
             rpc("keep_trial", keep, success=False)  # Never overwrite the saved profile.
             # Managed elsewhere moves the live app out of the ranked candidates.
             cli("manage", str(fixture), "--elsewhere")
@@ -130,7 +134,37 @@ def main():
             child.terminate(); child.wait(timeout=10); child = None
             time.sleep(1.2)
             assert not rpc("verify_trial", {"process": process})["can_keep"]
-            child=subprocess.Popen([str(BIN/"igpu-man"),"try-profile",json.dumps(profile)],env=environment,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            # Route the same original desktop ID, then observe a fresh ordinary
+            # launch. Only this owned EGL fixture is stopped/reopened.
+            setup={"profile":"fixture-kept","desktop_id":"fixture.desktop","cli_path":str(BIN/"igpu-man"),"login":False,"default_browser":False}
+            preview=rpc("normal_launch_preview",setup)
+            rpc("normal_launch_apply",{"setup":setup,"token":preview["token"]})
+            child=subprocess.Popen([str(BIN/"igpu-man"),"launch","--normal","fixture-kept"],env=environment,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            fields=Path(f"/proc/{child.pid}/stat").read_text().rsplit(")",1)[1].split()
+            managed_process={"pid":child.pid,"start_ticks":int(fields[19])}
+            for _ in range(80):
+                assert child.poll() is None
+                verified=rpc("verify_trial",{"process":managed_process})
+                if verified["rendering"]=="target_gpu":break
+                time.sleep(.25)
+            else:raise AssertionError(verified)
+            assert verified["decoding"]!="target_gpu"
+            candidates=rpc("candidates",{})
+            automatic=next(c for c in candidates if c["launch_path"]["registration"]==managed_process)
+            assert automatic["verification"]["rendering"]=="target_gpu" and automatic["verification"]["decoding"]!="target_gpu"
+            rpc("normal_launch_undo",{"profile":"fixture-kept"})
+            assert original.read_text()==original_text and child.poll() is None
+            # Reusing a saved name with different intent cannot inherit this
+            # process's automatic confirmation after Undo.
+            changed=dict(saved,args=["--different-launch-settings"])
+            rpc("save_profile",changed)
+            candidates=rpc("candidates",{})
+            automatic=next(c for c in candidates if c["launch_path"]["registration"]==managed_process)
+            assert automatic["verification"] is None
+            rpc("save_profile",saved)
+            child.terminate();child.wait(timeout=10);child=None
+            child=subprocess.Popen([str(BIN/"igpu-man"),"try-profile"],env=environment,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+            child.stdin.write(json.dumps(profile).encode()); child.stdin.close()
             for _ in range(60):
                 pending=rpc("pending_trials",{})
                 if pending and pending[0]["process"]["pid"]==child.pid:break
@@ -140,7 +174,7 @@ def main():
             rpc("discard_trial",{"process":pending[0]["process"]})
             assert rpc("pending_trials",{})==[] and child.poll() is None
             assert len(json.loads(cli("profile","list")))==1
-            print("PASS: imported launcher → fresh iGPU launch → sustained render verification → Keep + launcher; pending setup survives dashboard exits; discard leaves app alive; early Keep/existing instance/overwrite/exit protections; Managed elsewhere + Undo")
+            print("PASS: imported launcher → fresh iGPU launch → sustained render verification → Keep + normal-launch routing → measured iGPU rendering → Undo; pending setup survives dashboard exits; discard leaves app alive; early Keep/existing instance/overwrite/exit protections; Managed elsewhere + Undo")
         finally:
             if child is not None and child.poll() is None:
                 child.terminate(); child.wait(timeout=10)

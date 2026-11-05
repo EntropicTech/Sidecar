@@ -3,7 +3,7 @@
 pkgname=igpu-man
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Sidecar: observe AMD GPU placement and measure gaming workload isolation'
+pkgdesc='Sidecar: route desktop apps to the iGPU and verify GPU activity'
 url='https://github.com/EntropicTech/Sidecar'
 arch=('x86_64')
 license=('MIT')

@@ -61,12 +61,17 @@ require sustained identity-bound evidence. Chart auto-scale changes only axes.
   Stop is ordered after all preceding samples and acknowledges after persistence.
   While draining, the snapshot reports the recording as stopping.
 - Recording reads use query-only WAL connections with consistent read transactions.
-  Two read jobs and eight mutation requests may be admitted; excess requests fail
+  Four live jobs (including capabilities), two read jobs and eight mutation
+  requests may be admitted before JSON parsing; excess requests fail
   promptly as busy. Slow reads cannot occupy writer admission or the sampler lock.
   Statistics/export iterate samples, and exports buffer writes in 64 KiB chunks.
   Legacy materialized timeline/frame responses are capped at 64 MiB.
 - Sampler, diagnostics and writer completion are supervised. Unexpected worker
   failure terminates visibly instead of serving an indefinitely stale snapshot.
+- Explicit dashboard work uses an eight-entry nonblocking FIFO. Busy/stopped
+  admission failures are visible and unwind only the rejected action's pending
+  state; accepted mutations are not retried. Visibility hints may coalesce when
+  the queue is full because the worker reads the atomic visibility flag after work.
 - The dashboard's telemetry worker performs bounded blocking requests. Its
   lifecycle channel and separate D-Bus connection bypass that worker, so a slow
   or missing collector cannot block Close or Quit.
@@ -120,7 +125,9 @@ unrelated panics retain fail-stop behavior. No automatic restart loop is added.
 Configuration is the commit record for Keep. A versioned `pending_launcher`
 intent is saved atomically with the profile. Publication uses an exclusive temporary
 file and atomic no-clobber persist; resolved intents are cleared atomically.
-Startup completes missing artifacts or recognizes matching ones. Conflicts remain
+Only internal Keep constructs intents; public profile/registration inputs reject
+non-null recovery state. Trial wrappers receive bounded JSON over stdin instead
+of argv. Startup completes missing artifacts or recognizes matching ones. Conflicts remain
 untouched with a warning, while the committed profile remains usable. This is
 recoverable multi-file work, not filesystem-wide ACID; there is no periodic scan.
 
@@ -211,3 +218,184 @@ and on-demand Tokio blocking workers. No process-wide TOKIO_WORKER_THREADS
 variable is set or passed to launched applications. Do not lower blocking-pool
 capacity without checking sampler progress under simultaneous large reads; async
 worker sizing is not a total concurrency cap.
+
+
+## Collector service namespace policy
+
+The installed user unit shares the user's mount and user namespace for cross-process
+procfs accounting: `PrivateTmp=no`, `ProtectSystem=no`, `PrivateUsers=no`. It retains
+`NoNewPrivileges=yes`, `UMask=0077` and private data-file permissions. This sacrifices
+private temporary/read-only system mounts, with no elevated privileges or global
+kernel changes. Unit policy is installed through the coordinated updater so future
+updates preserve it. Real-unit coverage must be validated separately from private
+D-Bus fixtures; see [security](security.md) and Q22 in the review.
+
+
+## Recording integrity boundaries
+
+Dashboard notes drafts use recording IDs and start timestamps, independently from
+Inspect/detail responses and comparison selection. Catalog refresh does not
+overwrite unsaved text; deletion/identity replacement drops the stale draft. Drafts
+are window-model state retained in the tray, not persistent data until Save.
+
+Comparison checks run on existing bounded recording readers. Stable registered
+launch settings are normalized without process IDs, timing anchors, verification
+times or UI metadata; launch multiplicity is retained after sorting. Missing
+context remains unverified. A saved profile catalog is fallback context, not
+observed launch evidence. Duplicate IDs are rejected before expensive reads.
+
+Exports sync an INCOMPLETE marker before writing data. Streaming telemetry is
+flushed and synced; JSON/CSV files use private atomic writes; the bundle directory
+is synced before clearing the marker, then completion is synced. A crash leaves
+marked partial data or a completed bundle, subject to filesystem durability.
+The marker is established before any bundle data even if no error handler runs.
+There is no per-sample sync, new collector polling or sampler-lock I/O.
+
+
+## Native retirement before tray parking
+
+On Linux, winit's Wayland Window drop marks deferred retirement; the next regular
+event iteration removes WindowState and destroys its protocol objects. eframe
+0.31.1 tears down during LoopExiting. Returning directly to a blocking tray receive
+can therefore leave an undrawn native window registered with the compositor.
+
+The checked-in eframe compatibility patch runs one windowless event-loop cycle
+after normal teardown. It creates no renderer/window and exits at AboutToWait;
+winit's final roundtrip flushes destruction before returning. The application
+detaches repaint callbacks in on_exit, but sets parked/native_window_active=false
+only after that drain returns. Tray residency also excludes pending Show intent.
+There is no periodic parked cleanup task or hidden fallback window.
+
+The vendored source has pinned upstream provenance, an exact reversible patch,
+license notices and offline verification. Builds hash its Rust/manifests; source
+archives and installed documentation include provenance/licenses. See
+[vendor maintenance](../vendor/README.md). Existing private tests still cover X11
+and ordinary control; the explicit live KWin regression independently queries
+owned windows and sends actual window-manager Close events. Status flags alone
+are insufficient evidence of native teardown.
+
+## Application-first desktop routing
+
+Applications is the home view. Add app → Use iGPU resolves a native installed
+launcher and imports its original argument/settings semantics. The user does not
+need a test launch, named profile or new shortcut. GPU Activity supports
+observability and Launch Settings holds custom profiles. Recording/placement pages
+are retired from runtime navigation; optional CLI/API data remains compatible.
+The tray contains Open and Quit.
+
+Read-only `app_route_preview` plans against a virtual config. Writer-serialized
+Apply revalidates the plan, commits a private schema-2 journal with prepared new
+settings, then commits configuration before publishing any launcher that refers
+to it. The writer updates its live config even if later artifact publication fails;
+Resume can complete an interrupted prepared-profile commit. Filesystem operations
+stay outside the sampler lock. Pre-existing compatible settings are reused only
+when their effective arguments/environment/working directory and URL semantics
+match the native launcher. Otherwise quick setup creates its own settings.
+
+Undo restores original artifact/key values and removes unchanged auto-created
+settings. It keeps pre-existing/edited settings and all recordings. Conflict/error
+paths keep recovery data. Schema 1 remains readable with ownership defaulting to
+false; schema 2 is written and fails visibly in incompatible old builds. This is
+recoverable multi-file work, not filesystem-wide ACID or coordination with racing
+external editors. Private regular-file reads, size/job bounds and atomic writes
+remain; public clients cannot submit artifact paths/text or prepared settings.
+
+New setup never edits app startup/session restoration; login:true is rejected.
+Legacy `removing_login` restores only previously owned startup/exclusion changes,
+preserving the normal launcher and other user settings, and can be retried after
+interruption. Sidecar's own optional tray autostart is independent and retained.
+
+Candidates attach automatic rendering/decoding evidence from existing recent
+history only for matching saved iGPU registrations. Effective settings and live
+PID/start identities must match, even if a profile name is reused. No extra
+filesystem scan, telemetry history or idle timer is introduced. Launcher aliases
+are indexed on catalog refresh; the main view does not resolve executables or
+clone full launcher profiles on redraw. Shortcut checks remain on demand/reopen.
+The managed wrapper can request StartUnit for the fixed collector user service;
+it never silently falls back to launching with an unknown GPU. App processes are
+never killed or migrated.
+
+
+## GPU display labels and focused activity view
+
+`Gpu.name` retains the raw diagnostic description. Optional `display_name` and
+`display_name_source` add a presentation label without changing PCI identity,
+selection or engine attribution. Old snapshots/recordings deserialize these as
+absent. Kernel product_name wins, followed by exact device **and revision** lookup
+in the local libdrm database; integrated devices can fall back to host CPU context,
+explicitly labeled as such rather than a GPU model. Conflicting/missing IDs do not
+select a nearby Radeon product. Raw names and sources remain in Device details.
+
+The collector loads bounded local amdgpu.ids (512 KiB) and cpuinfo (1 MiB) once
+at construction, then resolves/caches metadata on first device observation. Cache
+entries are dropped when PCI devices disappear or their configured role changes.
+A collector restart refreshes database/CPU metadata. Optional missing, malformed,
+non-UTF-8 or oversized data falls back to existing diagnostic names; it cannot
+prevent telemetry. There are no new per-sample naming reads, helpers or timers.
+The existing per-device lspci diagnostic lookup remains cached. GPU discovery and
+normal/recording rates are unchanged.
+
+The dashboard's GPU activity widgets live in gpu_activity.rs. Usage/power/
+temperature and charts remain visible; detailed sensors, device paths and KWin
+output are collapsed. Partial-coverage warnings and recommendations remain visible.
+Columns stack in narrow windows. The view uses existing samples/history and bounded
+UI layout only; fixed and independently labeled automatic axes retain their semantics.
+
+
+## Legacy advanced view presentation (validation only)
+
+Launch settings and saved-recording widgets live in profiles_ui.rs and
+recordings_ui.rs; placement experiments remain in applications_ui.rs. Shared
+page/card/typography helpers in theme.rs affect only layout. Secondary actions
+move into menus or expandable sections without additional background jobs,
+collection, storage or polling. Stable explicit editor IDs let nested profile
+menus reveal the existing draft; the draft data remains in Dashboard and survives
+tray parking. No new persisted UI state or configuration schema is introduced.
+
+Recording selection continues to control identity-bound notes/comparison;
+inspection remains independent. Notes/files, inspected results and comparisons
+have separate surfaces. Statistics use responsive cells and distinguish missing
+values from measured zero. Custom normal-launch preparation opens its existing
+routing section automatically; conflicts remain visible outside collapsed tools.
+A kept experimental profile still uses the existing saved-profile/recovery path;
+its guidance points to Applications or Launch Settings without
+suggesting app login startup.
+
+Applications presentation uses compact rows across the available window width,
+with a small fixed inset. Wide rows align separate render/decode evidence beside
+app identity; narrow rows wrap evidence below. Details is a read-only popup for
+launcher identity, guidance and the existing explicit status check. Conflicts and
+recovery actions stay visible. This introduces no new model, worker or persisted
+state and reuses the same cached snapshot/candidate/profile data.
+
+
+## Three-tab runtime navigation
+
+The installed dashboard exposes only Applications, GPU Activity and Launch
+Settings (view IDs 1/0/2). navigation.rs normalizes retired/invalid view state to
+Applications before control publication or polling. Launch Settings is a direct
+tab and carries no Advanced heading. Runtime builds do not poll pending trials or
+recording catalogs for removed views. Existing saved settings/recordings and
+collector/CLI interfaces are retained; recording-capable profile launches still
+work with CLI recording controls.
+
+Retired view implementations remain only as screenshot-feature compatibility
+fixtures for legacy trial/recording regressions. Constant build guards keep their
+routing and polling out of optimized installed builds; they have no navigation
+entry even in fixture builds. The normal screenshot --all smoke covers three
+visible tabs. This deliberately avoids deleting backend data/recovery support
+while reducing the product's runtime interface. Further removal of legacy fixture
+widgets is a separate source-maintenance task, not a new product entry point.
+
+
+Launch Settings uses theme::full_width_page with the same 16-point gutter as
+Applications. Its compact rows reuse saved profiles and cached GPU descriptions;
+full paths/management context are exposed on demand. The editor's explicit
+persistent ID, draft fields, request payloads and managed-profile edit guards are
+unchanged. No new worker, filesystem lookup, collection or persisted state is added.
+
+Separate launcher creation is an explicit collector-writer operation shared by
+CLI and dashboard. The collector resolves the current saved profile, builds the
+entry, and uses the same atomic no-clobber publication as Keep recovery. There is
+no configuration write or periodic recovery scan for this derived shortcut.
+The GUI queues the request; it never performs publication filesystem I/O on a frame.

@@ -4,6 +4,28 @@ Automated and hardware results are recorded here during implementation. Hardware
 checks require the actual desktop session; a unit test does not establish gaming
 performance or suspend/resume correctness.
 
+## Current acceptance summary
+
+The latest recorded local code-quality pass is
+[November 4](#code-quality-hardening--november-4-2026): 80 Rust tests plus private-bus
+integration, release lifecycle/tray/startup, staged packaging and updater fixtures
+passed. The fresh advisory gate passed with five visible maintenance notices.
+[Code review](code-review.md) tracks remaining work and acceptance criteria.
+
+The current dashboard is [three tabs](#three-tab-dashboard--november-4-2026).
+Older entries below document previous builds, including removed trial/recording
+pages and retired app login-startup features; they are not the current user guide.
+Use [Everyday use](user-guide.md) and [setup](setup.md) for current instructions.
+
+Latest short local release observations measured collector CPU at 0.47% of one
+core and about 16.2 MiB RSS over 15 seconds. Cold tray had zero measured CPU ticks
+and no redraw/polling wake-ups, with about 10.6 MiB RSS. These are single-run
+observations, not a universal resource bound or gaming-performance claim. Physical
+reconnect, suspend/resume, Firefox playback and gaming repeatability remain
+separate [hardware acceptance checks](#required-hardware-acceptance).
+
+## Historical evidence
+
 ## Results — November 1, 2026
 
 - Release binaries build successfully; formatting and Clippy checks pass.
@@ -194,7 +216,7 @@ both GPUs still need the controlled hardware experiments below.
 - Unplug/reconnect the side monitor and suspend/resume. After at most one
   diagnostics refresh (30 seconds), confirm identities, modes, and activity.
 - Restart the collector while the dashboard is open; verify the stale banner
-  and recovery. Verify dashboard Close, reopening, marking, and Quit.
+  and recovery. Verify dashboard Close, reopening and Quit, plus CLI markers.
 - Run the nine-run, three-condition gaming comparison, then repeat after an update.
 - Compare monitoring off, tray/dashboard closed, dashboard open, and recording.
   Use at least three runs per mode. Target collector-only CPU below 1% of one
@@ -532,3 +554,494 @@ dbus-run-session -- python3 tests/measure_threads.py /tmp/threads.json --seconds
 # IGPU_MAN_BIN_DIR can point at a preserved before build. Independent session
 # buses can run a pair concurrently; never use the real service as test cleanup.
 ```
+
+
+## Security boundaries — November 1, 2026
+
+Q24–Q28 are covered by local formatting/all-feature Clippy, documentation contracts,
+57 Rust tests and private-bus integration. New security fixtures reproduce wrapper
+argv inspection using only owned processes and synthetic environment values, reject
+public recovery intents at save/registration/trial boundaries, restart the fixture
+collector without publishing a launcher, exercise malformed/oversized stdin and
+preserve exact arguments and explicit environment values. They refuse an existing
+collector and never restart a real browser or change GPU settings.
+
+Admission tests fill each class, prove busy rejection precedes JSON parsing, recover
+from parse failures, and retain live blocking permits after caller cancellation.
+Existing interrupted-Keep/conflict/symlink tests still pass. Diagnostic tests cover
+exact byte limits, excessive and continuous output, invalid UTF-8, nonzero exits,
+timeout and direct-helper reaping. Output is never captured to disk.
+
+Native iGPU trial verification/Keep, cold tray, delayed/missing hosts, park/reopen,
+watcher recovery and eleven dashboard lifecycle cases passed. Synthetic large-read
+checks preserved sampling/live RPC/Stop progress. Staged install/removal and private
+updater success/refusal/rollback/recovery passed. Release CPU/RSS and quiet-tray
+observations use the existing private measurement tool; machine-specific reports
+remain local. Short uncontrolled observations do not establish gaming benefit or
+a universal overhead bound.
+
+The pinned cargo-audit 0.22.2 gate passed locally against current RustSec data,
+reporting five unmaintained-package notices, no matched vulnerability advisories,
+and no ignored advisories. Follow-ups and limits are in [security](security.md).
+CI configuration adds scheduled checks and Dependabot; hosted results require the
+changes to be submitted and run. At this review point, the service sandbox and
+Q22 procfs acceptance remained unchanged; the approved service-policy follow-up
+below supersedes that state. No suspend/resume, physical monitor reconnect or
+browser/video playback certification is implied by these checks.
+
+
+## Approved user-service accounting policy — November 1, 2026
+
+An explicit Sidecar-only authorization approved PrivateTmp=no, ProtectSystem=no
+and PrivateUsers=no while retaining NoNewPrivileges=yes and UMask=0077. The unit
+template documents the compatibility tradeoff; no root helper/capability, global
+procfs/sysctl setting or other service was changed. Rendered system/user installs
+are checked for this security/observability contract with systemd unit validation.
+
+Before deployment, the installed service had a different user namespace from the
+desktop caller and inaccessible per-process DRM accounting. After a guarded update
+with no active recording, the effective unit retained the approved settings and
+shared the desktop user's namespace. Its observed DRM-client count matched an
+independent same-account fdinfo read; measured/idle engine metrics and executable
+identities became available again. Existing inaccessible processes remained
+explicit in coverage; full access to every user process is not claimed.
+
+The updater preserved saved profiles, recording catalog, live launch registrations,
+service enablement and tray startup. Local check/test and staged install/removal
+checks passed. Read-only live-service sampling and a short CPU/RSS observation
+were kept in private local reports rather than added to the public repository.
+Firefox engine counters were readable but idle during the observation; this is
+not a rendering/video-playback certification. Other hosts, suspend/resume and
+physical reconnect still require separate validation. Custom unit overrides can
+reintroduce namespace restrictions and must be checked against actual coverage.
+
+
+## Recording integrity fixes — November 1, 2026
+
+Q29–Q31 cover notes identity, distinct/comparable runs and export interruption.
+Desktop model regression switches recordings, preserves unsaved text across catalog
+updates and drops deleted/reused identities. Store fixtures reject repeated IDs,
+compare sampling and independent explicit setting changes, ignore ephemeral
+identity/verification/profile-name differences, normalize launch ordering and
+retain unverified missing context. Warnings omit argument/environment values.
+
+`dbus-run-session -- python3 tests/recording_integrity.py` uses private XDG data
+and refuses an existing collector. It verifies separate note writes, distinct
+run statistics and settings warnings, then applies file-size/core-dump limits
+only to its own collector to cause abrupt SIGXFSZ during a synthetic export.
+The partial bundle retains its prewritten private marker; restart and a fresh
+export succeed, preserving the failed destination and original frame logs.
+This requires Linux resource.prlimit but no GPU/display. Make test and CI include it.
+
+Explicit export durability includes file/directory synchronization without adding
+per-sample work. Existing large-read tests validate live sampling/RPC/Stop progress;
+release CPU/RSS and quiet-tray comparisons use private local observations. Short
+uncontrolled runs cannot establish gaming benefit or universal overhead. Native
+recordings UI and lifecycle, staged packaging and updater checks validate delivery.
+Full hardware suspend/reconnect and playback validation remain separate.
+
+Local `make check`/`make test` passed with 60 Rust tests and the private-bus
+integration suites. The recordings screenshot was visually inspected with the
+selected run's own notes displayed; cold tray, park/reopen and eleven dashboard
+lifecycle cases passed. Staged install/removal and private updater success, active
+capture refusal, rollback and interrupted recovery passed. Short paired release
+CPU/RSS observations retained quiet-tray window/update/wakeup invariants; measured
+collector CPU remained below the normal target in this local sample. Raw reports
+and the UI capture remain local. Hosted exact-source checks are not implied.
+
+
+## Native Wayland Close regression — November 1, 2026
+
+The prior implementation reproduced a false parked state: after native KWin
+Close, Sidecar reported tray residency while the compositor retained an undrawn,
+non-deleted window. Earlier API/status-based lifecycle tests missed this boundary.
+The local eframe fix drains deferred retirement in a windowless cycle before the
+application publishes parked state; it does not add a periodic timer.
+
+`python3 tests/wayland_window_lifecycle.py --live --cycles 8` uses an independent
+private bus/XDG fixture and short-lived KWin scripts restricted to its child PID.
+It verifies no cold-start window, exactly one visible window, zero native windows
+after title-bar/API Close, same-process reopen, stopped parked updates and Quit.
+It refuses an existing real dashboard; scripts are unloaded and no compositor
+settings or real collector state are changed. Raw crash/core details remain local.
+
+A lifecycle unit regression distinguishes invisible/tearing-down from retired and
+checks pending Show intent. Existing private startup/tray/dashboard/recording tests
+remain required, including X11/software-rendered CI checks. Vendor integrity,
+staged source/install/license checks and advisory scanning cover the compatibility
+source. Actual KWin acceptance complements CI; it cannot be inferred from status
+counters, and other compositors still need their own native checks.
+
+The local full check/test suite passed (61 Rust tests plus private integration).
+Eight real KWin native/API Close/reopen cycles passed with independent window
+queries. Existing cold tray, six park/activate cycles, rapid reopen, watcher loss,
+eleven dashboard lifecycle cases and X11 tray checks passed. Staged packaging
+verifies vendor source/license/provenance inclusion; isolated updater success,
+refusal/rollback/recovery checks passed. The advisory gate passed with the same
+five documented maintenance notices. Release idle observation after warm Close
+checks that the process stays alive with no native windows, redraws or telemetry
+wakeups; machine-specific reports remain local. No GPU-reset, suspend/reconnect
+or gaming-performance certification follows from this window lifecycle fix.
+
+## Reversible normal launches and login — November 2, 2026
+
+Q33 adds opt-in Preview → Apply → Check → Undo to saved iGPU profiles. Keep opens
+that setup without automatically changing defaults. Portable Rust fixtures cover
+interrupted apply/undo, preserved original bytes, external-edit conflicts,
+independent restore-exclusion ownership, unrelated MIME/session keys, ambiguous
+INI forms, unsafe paths/symlinks, corrupt journals, upstream/profile drift and
+Firefox forwarding with PID reuse/unregistered instances. The suite has 69 Rust
+tests; passing fixtures do not prove every application obeys GPU preferences.
+
+`make test` includes `tests/normal_launches.py` on a private bus/XDG tree. Its
+`service_fixture` is a fake user manager that starts only an owned collector;
+no real systemd service is stopped/started by this test. Local acceptance passed
+fresh-preview refusal, ordinary argv/URL routing, startup-conflict detection,
+collector/login-style restart, on-demand service start, exclusion/default-handler
+persistence, original preservation, recording guards, Undo and conflict recovery.
+Successful apply/exec checks need an AMD iGPU and skip explicitly without it.
+The existing release EGL placement fixture also passed normal/login routing →
+sustained measured iGPU rendering → Undo; it did not claim decoder activity.
+Native close/reopen passed six actual KWin cycles plus private-bus dashboard/tray
+checks. Staged install/removal and updater success/rollback/recovery passed,
+including private routing-journal backup/preservation. Preview/status screenshots
+were rendered and inspected locally; captures contain temporary fixture paths.
+
+These checks use temporary launchers/defaults. Real user defaults, Firefox, other
+applications and compositor configuration are left alone. A collector restart or
+simulated login command is not a real logout/reboot test. Next-login acceptance,
+old manually saved sessions, browser codec/video playback and application-owned
+startup remain explicit hardware/user checks. Direct script/executable/D-Bus and
+alternate desktop-ID launch paths are not universally intercepted.
+
+A clean exact-release resource check used its own process/session bus for ten
+seconds: collector 0.50% of one core / 14.7 MiB RSS, cold tray no measurable CPU /
+10.6 MiB RSS, zero windows/redraws/telemetry wakeups. Eight local status calls in
+the routing fixture peaked at 9.7 ms. These are short uncontrolled desktop
+observations, not steady-state memory or worst-case latency bounds; the two-minute
+history was still filling, and CPU-tick quantization limits precision. An earlier
+35-second observation emitted its complete report (collector 0.60%, 24.3 MiB;
+tray 0%, 10.4 MiB) before its outer command wrapper exited 143; that invocation
+is not counted as a clean harness pass. The isolated-process-session retry exited
+successfully. No raw machine report is published. No route scanner or timer is
+added to normal sampling or quiet tray residency.
+
+## Application-first usability pass — November 2, 2026
+
+The primary path is now Applications → Add app → Use iGPU → observe → Undo.
+Profiles/trials/recordings remain accessible under Advanced, with data preserved.
+New setup cannot create app startup/session-restore changes; old login changes
+have a separate retirement operation that leaves normal routing intact.
+
+`make check` and `make test` passed with 72 Rust tests. New private-bus
+`tests/app_routing.py` covers pure preview without a saved profile, stale-plan,
+recording/maintenance guards, direct argv/URL routing, untouched startup/session/
+default-handler files, persistence, existing-profile reuse, and Undo preserving
+profiles/recordings. Rust fixtures cover interrupted prepared-profile commits,
+v1 legacy journal retirement, idempotence and conflicting external edits.
+The release EGL fixture passed automatic separate rendering evidence and rejected
+confirmation inherited through a reused profile name with different launch intent.
+No decoder confirmation or gaming improvement was inferred from that render test.
+
+Native checks passed 15 private-bus dashboard lifecycle cycles, tray parking/
+reopening/startup and six actual KWin retirement cycles. Temporary-prefix packaging
+and updater success/refusal/rollback/interruption checks passed. The main view,
+app catalog, opaque confirmation and managed card were rendered and inspected;
+the README image is a neutral fixture capture, not private user diagnostics.
+Installed migration acceptance checks must confirm the normal launcher bytes,
+profile settings/PCI target and recording catalog are unchanged while legacy
+startup/exclusion ownership is removed. Tests never apply migration to real data
+as cleanup; the installed retirement is a separately authorized user action.
+
+One release run used two sequential 15-second observations after three seconds
+of warm-up: collector-only 0.53% of one core / 16.3 MiB RSS; Applications-open
+collector 0.73% / 25.1 MiB and desktop 0.13% / 121.4 MiB. Reaped diagnostic helpers
+bring the latter collector observation to 0.87%. Eight status calls during the
+full regression run peaked at 21.2 ms. These short uncontrolled desktop readings
+include a growing history/allocator and are not steady-state RAM, worst-case
+latency, repeatability bounds or gaming benchmarks. No new quiet-tray polling or
+per-sample logging was added; recording catalogs are not polled on main views.
+Real reboot, suspend/resume and Firefox video-codec verification were not repeated
+as part of this usability pass.
+
+## Applications style refinement — November 3, 2026
+
+The Applications page now uses a centered 880-point content column, aligned app
+cards/catalog actions, restrained connection status, and separate rendering/video
+panels that stack in narrow windows. Setup intent remains distinct from observed
+activity. Undo stays visible, Check shortcut is under Shortcut details, and
+conflicts remain visible outside collapsed details. Visuals use the existing
+palette and painter-drawn initials; no icon-directory scans, new dependencies,
+periodic jobs or collection/storage changes were added.
+
+`make check` and `make test` passed (72 Rust tests plus isolated integration,
+security, routing, update-protocol, recording responsiveness/integrity checks).
+The primary app-routing fixture passed with real native captures of empty,
+catalog, confirmation and managed states at both 1120- and 520-point widths;
+these eight images were inspected locally. The narrow capture switch
+`IGPU_MAN_SCREENSHOT_NARROW=1` exists only in screenshot-feature builds. The README
+capture uses a neutral fixture. No tests assert styling constants/pixel values.
+Private-bus dashboard lifecycle (15 cycles), tray Close/reopen and cold tray
+startup/fallback passed. Release build and temporary-prefix packaging/install/
+removal/source-archive checks passed; systemd unit verification required access
+to local verification sockets outside the restricted command sandbox.
+
+No real user app was relaunched by these tests. Actual KWin title-bar retirement,
+reboot, suspend/resume, Firefox codecs and runtime overhead were not remeasured
+for this visual-only change. Earlier hardware/performance evidence above retains
+its stated limits; this pass makes no new resource or gaming-performance claim.
+
+## Focused GPU activity and local labels — November 3, 2026
+
+GPU activity now shows colored usage/power/temperature, charts and compact monitor
+connections. Detailed sensors/PCI/render paths and collection/KWin output remain
+expandable; partial-coverage warnings and recommendations stay visible. A stale
+collector is explicitly labeled as last-known readings. Fixed and automatic axes
+retain their existing behavior, and cards stack in narrow windows.
+
+Optional display metadata preserves raw device names and PCI identity. New
+`gpu_names` Rust fixtures check exact revision matching across shared Radeon IDs,
+conflicting/malformed rows, missing/oversized local data, kernel-name precedence
+and CPU-context fallback. A collector fixture checks old sample deserialization
+and cache removal after device disappearance or configured-role changes. On the
+current machine, the installed local database resolves 744c/cc to Radeon RX 7900 XT;
+13c0/cb has no matching entry and uses Ryzen 7 9800X3D graphics as explicit CPU
+context, not an asserted GPU model. Raw diagnostic names remain accessible.
+
+`make check` and `make test` passed: 75 Rust tests plus isolated integration,
+security, normal/primary routing, update-protocol, recording responsiveness and
+interrupted-export checks. Fixed, auto-scale and 520-point narrow native captures
+were inspected; the wide captures show both devices with independent axis labels.
+Private-bus dashboard lifecycle passed 15 cycles, with paused/missing collector
+and recording preservation. Release build and temporary-prefix package/install/
+removal/source-archive checks passed. Tray Close/reopen and cold-start/fallback tests also passed before the guarded
+installed update. Captures and machine reports
+stay local; no user applications are relaunched by these fixtures.
+
+Two sequential collector-only release observations used the same 15-second window
+and three-second warm-up on the current uncontrolled desktop: previous release
+0.60% of one core / 17.67 MiB RSS; updated release 0.60% / 17.89 MiB. Eight status
+CLI calls after each CPU interval peaked at 3.74 ms / 3.84 ms respectively (including
+client process startup). `tests/measure_runtime.py` now reports those eight probes
+outside the CPU interval. Naming databases load once, with per-device resolution
+cached; no recurring name probes or new timers are added. These are single short
+observations with CPU-tick quantization, changing desktop load and a growing ring,
+not repeatability limits, steady-state RAM, worst-case latency or proof of a speedup.
+A concurrent integration run separately peaked at 21.0 ms across eight status calls.
+No actual reboot, suspend/resume, KWin title-bar retirement, Firefox codec validation
+or gaming-performance comparison was repeated for this change.
+
+## Advanced page refinement — November 3–4, 2026
+
+Advanced Launch settings, Placement experiments and Saved recordings now share
+bounded-width cards, muted supporting text and grouped secondary actions. Custom
+profiles expose Launch plus More; the editor, rendering/recording switches, normal
+routing and Steam commands have dedicated expandable sections. Routing conflicts
+remain visible even when its tools are collapsed. Candidate cards retain separate
+graphics/video/observation and launch-origin evidence. Trials retain Review →
+Verify → Keep gates, and guidance no longer suggests app login startup.
+
+Recordings separate capture, selection, identity-bound notes/files, inspected
+results and comparison. Import/export tools are expandable, while deletion still
+requires its explicit confirmation. Statistic cells adapt to narrow windows,
+retain measured precision, show the exact threshold on hover, and distinguish
+unavailable fields from measured zero. No collector/API/storage/schema changes,
+new scanning, timers, dependencies or background work were introduced.
+
+`make check` and `make test` passed with 77 Rust tests and the existing private-bus
+integration/security/routing/update/recording suites. New headless UI coverage
+reproduced and corrected an editor identity mismatch between nested menus and its
+collapsing section; the regression checks opening, persistence and body visibility.
+A display-boundary regression checks missing/malformed statistics versus actual
+zero. `tests/desktop_smoke.py --all` now includes the advanced experiment view
+(index 4). All five views were rendered at normal and 520-point widths; profile
+editor, selected notes, responsive statistics, normal-routing preview/status and
+trial review/verification/recovery captures were inspected locally. Trial captures
+allow their scroll animation to settle before capture, rather than treating an
+early animation frame as the destination.
+
+The owned EGL placement fixture passed fresh launch, sustained iGPU rendering,
+Keep, normal routing, Undo, early-Keep/existing-instance/overwrite/exit guards and
+Managed elsewhere. The normal-launch fixture preserved original startup/session/
+default-handler files and passed recovery/conflicts. No real user app was restarted.
+Private native lifecycle passed 15 cycles, including paused/missing collector and
+recording preservation; tray parking/reopen and cold-start/fallback tests passed.
+Temporary-prefix packaging/install/removal and source-archive checks passed.
+
+The collector and recording ownership/cadence are unchanged; CPU/RSS, real KWin
+title-bar retirement, suspend/resume, reboot, Firefox codecs and gaming performance
+were not remeasured for this presentation change. Earlier measured overhead and
+hardware observations retain their stated limits. Fixture captures/reports remain
+local; installation uses the guarded updater and verifies saved data separately.
+
+
+Resumed acceptance on November 4 reruns the release checks after the pause. An
+extra updater-harness invocation without an isolated bus exposed a fixture safety
+gap: it created/stopped a synthetic recording and replaced the tray process with
+its temporary copy. Only that recording was removed by exact ID/start/finish/sample
+identity, and the installed tray was restored; the real collector and other apps
+were not stopped. The harness now self-spawns dbus-run-session by default, refuses
+existing Collector/Dashboard/user-manager owners before staging or mutations, and
+requires the bus owner's PID to match its owned collector child before proceeding.
+A nested occupied-bus regression proves refusal while its profiles/catalog remain
+unchanged. Corrected updater success, active-recording refusal, rollback and
+interrupted recovery passed on the private bus. The incident is not counted as a
+successful isolated run; subsequent installed preservation checks use a fresh
+private before/after baseline.
+
+## Compact Applications rows — November 4, 2026
+
+Applications now uses the available width with a fixed 16-point content inset,
+rather than a centered 880-point column. Managed apps use short rows with smaller
+initials/padding, separate rendering/decoding readings and visible Open app/Undo.
+Narrow windows wrap activity below the identity/actions row. Repeated guidance
+moves to hover text and Details → Check shortcut; conflicts, interrupted Undo and
+other recovery actions stay outside the menu. Requested normal-launch intent
+remains separate from recent measured activity. No backend, schema, sampling,
+queue, persistence or background-work changes were introduced.
+
+`make check` and `make test` passed with the existing 77 Rust tests and private-bus
+integration/security/routing/update/recording checks. No tests assert styling or
+pixel constants. The primary app-routing fixture additionally rendered empty,
+catalog, confirmation and managed states at normal and 520-point widths; captures
+were inspected, including the final narrow Rendering/Video decoding labels. The
+README image is the neutral managed-app fixture. Existing routing checks preserve
+argv/URL handling, startup/session/default files, profiles/recordings and Undo.
+Native lifecycle passed 15 private-bus cycles, including paused/missing collector
+and recording preservation; tray Close/reopen and cold-start/fallback tests passed.
+Release build and temporary-prefix packaging/install/removal/source-archive checks
+passed. Actual user installation uses make update-user and private before/after
+fingerprints for routing, launchers, profile settings, catalog and tray startup.
+
+This is a presentation change. Real KWin title-bar retirement, reboot/suspend,
+Firefox codecs, gaming performance and runtime CPU/RSS were not remeasured; earlier
+hardware/overhead evidence retains its limits. No real user app is restarted by
+the isolated fixtures, and collection/storage defaults are unchanged.
+
+## Three-tab dashboard — November 4, 2026
+
+Installed navigation is Applications, GPU Activity and Launch Settings. Advanced
+and its placement/recording pages are removed; Launch Settings is directly
+accessible and has no Advanced heading. Saved data and optional CLI/API tools
+remain compatible. Runtime builds skip retired recording-catalog/pending-trial
+polls. Retired widgets remain only as screenshot-feature compatibility fixtures,
+without navigation entries, for existing legacy-state regressions.
+
+`make check` and `make test` passed with 78 Rust tests and the private-bus
+integration/security/routing/update/recording suites. A navigation regression
+checks retired/invalid view normalization; the exact release native check
+`IGPU_MAN_BIN_DIR=target/release dbus-run-session -- python3 tests/dashboard_lifecycle.py --runtime-navigation`
+checks that retired-view fixture environment settings cannot reopen those pages
+in runtime builds. It passed 16 lifecycle cycles including paused/missing
+collector, relaunch races and recording preservation. CI runs the release check
+before building screenshot fixtures. Screenshot --all now renders only the three
+visible tabs; each was inspected and the README's neutral app capture refreshed.
+Tray parking/reopen and cold-start/fallback checks passed.
+
+No saved-data migration, GPU placement, collection/storage default or native
+lifecycle implementation changes are introduced. Runtime CPU/RSS, actual KWin
+title-bar retirement, reboot/suspend, Firefox codecs and gaming performance were
+not remeasured; previous hardware/overhead evidence retains its limits. Packaging
+uses temporary prefixes, and the installed update uses private preservation
+fingerprints and the standard recording/maintenance/window guards.
+
+## Compact Launch Settings — November 4, 2026
+
+Launch Settings now uses the available window width with the same 16-point gutter
+as Applications. Short profile rows show name/executable and GPU target side by
+side when wide, or name/target together when narrow. Launch/More remain visible;
+full executable paths and normal-launch ownership context are available in More,
+with a path tooltip on the displayed basename in wide windows. Launch color uses
+the requested target GPU, not an observed-placement claim. Managed profile edit/
+delete guards, editor identity/drafts, callback payloads and saved fields remain
+unchanged. No backend, polling, I/O discovery, persistence or sampling work is added.
+
+`make check` and `make test` passed with the existing 78 Rust tests and isolated
+integration/security/routing/update/recording suites. Normal and 520-point narrow
+profile rows plus the narrow expanded editor were rendered and inspected. No tests
+assert styling constants. Exact-release navigation/native lifecycle passed 16
+cycles, including retired-view refusal, relaunch races, paused/missing collector
+and recording preservation. Tray Close/reopen, cold-start/fallback, release build
+and temporary-prefix packaging/install/removal/source-archive checks passed.
+Installation uses make update-user and private before/after fingerprints for
+routing/launchers, profiles, recording catalog and tray startup.
+
+This is a presentation-only change. Runtime CPU/RSS, real KWin title-bar retirement,
+reboot/suspend, Firefox codecs and gaming performance were not remeasured; prior
+hardware/performance observations retain their stated limits. No real user app is
+restarted by the fixture checks, and no saved-data migration is required.
+
+## Code-quality hardening — November 4, 2026
+
+- `make check` passes Rust formatting, all-target/all-feature Clippy, documentation
+  contracts and Python fixture/packaging syntax compilation. `make test` passes
+  80 Rust tests (61 core, 14 desktop, 5 daemon) plus the portable interprocess suite.
+- Separate launcher regressions cover existing regular/dangling-symlink destinations,
+  private permissions, simultaneous publication (exactly one winner) and temporary
+  cleanup. GPU-independent CLI/API checks cover conflicts, unchanged profiles,
+  missing/relative/unknown-key requests and the maintenance mutation guard. The
+  strict typed `create_launcher` request resolves authoritative saved settings.
+- Dashboard queue saturation preserves admitted FIFO work, unwinds only rejected
+  normal/trial pending flags, recovers after draining and reports disconnection;
+  Quit remains available on the independent lifecycle channel. Visibility hints
+  coalesce when work is already queued, preserving event-driven parked behavior.
+- `tests/fixture_isolation.py` verifies 16 fixture entry points refuse an occupied
+  private bus before mutation. An active synthetic recording, profile/catalog
+  identity/metadata and owned collector remain intact; sample counts naturally
+  continue increasing. A different live child PID is rejected as collector owner.
+  Shared `fixture_bus.py` guards require an explicit session bus, empty protected
+  names and the expected spawned collector PID before fixture mutations.
+- Release native lifecycle passes 16 clean cycles including ignored retired-view
+  environment settings, missing/paused collector and active-recording preservation.
+  Release tray lifecycle/startup cover six park/reopen cycles, rapid Show, watcher
+  loss/recovery, cold no-display startup, delayed/missing host and parked Quit.
+  All three tabs rendered using private synthetic data; Launch Settings inspected.
+- Temporary-prefix packaging/install/removal/source-archive checks and updater
+  success/refusal/rollback/interrupted-recovery fixtures pass. No application,
+  default-handler or startup tests operate on installed user configuration.
+- Fresh RustSec audit with cargo-audit 0.22.2 passes the project's vulnerability,
+  unsoundness and yanked-crate policy; five existing maintenance notices remain
+  visible (paste, ttf-parser, zbus_names, zvariant, zvariant_derive). No dependency
+  was upgraded or advisory ignored in this change. Q11's older JSON boundaries
+  and Q28's dependency migrations remain follow-ups with acceptance criteria.
+- Two separate 15-second release observations, one before and one after, measured
+  collector CPU at 0.67% / 0.47% of one core and ending RSS at 16.6 / 16.2 MiB.
+  Cold tray had zero measured CPU ticks, zero windows/redraws/telemetry wake-ups,
+  and about 10.6 MiB RSS in both. This short uncontrolled sample, with timer
+  quantization and differing background activity, establishes no speedup or
+  universal CPU bound. It is not a game-performance measurement.
+- Native recording responsiveness with a synthetic 127.95 MiB recording and two
+  concurrent readers passed: 26 live calls, zero errors, maximum CLI-inclusive
+  snapshot latency 2.85 ms; Stop during export 4.17 ms; nine distinct live samples,
+  ten persisted samples and three dashboard telemetry updates. These are one-run
+  local observations, not latency guarantees.
+- Firefox playback/GPU placement, physical monitor reconnect, suspend/resume and
+  independent KWin-script window retirement were not repeated for this review.
+  The installed dashboard remained parked while fixtures used separate buses/data.
+
+## Documentation and source-publication preparation — November 4, 2026
+
+- Reduce README from 510 to 136 lines and separate setup/removal, everyday tasks
+  and CLI instructions into indexed guides. Keep retired UI/startup descriptions
+  explicitly historical in validation and consolidate Unreleased around current
+  behavior. Review commands, defaults and routing/decoding limits against source.
+- Documentation contracts now check public CLI coverage in `docs/cli.md`, while
+  README stays a concise front page. Eighteen Markdown documents pass local links,
+  index, CLI/API/config/version and distribution contracts; Python syntax checks
+  and all-target/all-feature Clippy pass.
+- Temporary system/user-prefix installation and source-archive tests pass with all
+  new guides. Installed documentation additionally checks local links, including
+  the newly shipped changelog, license and source-layout config example. Removal
+  retains the existing private-data boundary.
+- Full portable suite passes again: 80 Rust tests plus isolated D-Bus integration,
+  routing, fixture-ownership, recording-integrity and responsiveness checks. The
+  fresh advisory gate passes with the same five maintenance notices. No dependency,
+  GPU policy, application route or UI behavior changed in this documentation pass.
+- Review the source inventory, synthetic public screenshot, vendored-source hashes
+  and credential/personal-path scan before publication. The only path-pattern
+  matches were unchanged upstream vendor examples, covered by pinned provenance.
+  Logs, recordings, local runtime state, generated builds and exports are excluded.
+- Native/hardware evidence remains the dated earlier checks above. GitHub workflow
+  configuration and local checks are not a claim that hosted CI has passed; verify
+  runs for the actual pushed commit separately. This source push does not create
+  a release tag, publish release assets, or submit an AUR/CachyOS package.

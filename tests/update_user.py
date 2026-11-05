@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
 """Transactional developer updater tests with a real private collector, fake systemd."""
-import importlib.util,json,os,shutil,subprocess,tempfile,time
+import importlib.util,json,os,shutil,subprocess,sys,tempfile,time
 from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('update_user',ROOT/'packaging/update_user.py');u=importlib.util.module_from_spec(spec);spec.loader.exec_module(u)
 
+def bus_call(method, name):
+ result=subprocess.run(['busctl','--user','--timeout=3','call','org.freedesktop.DBus','/org/freedesktop/DBus','org.freedesktop.DBus',method,'s',name],capture_output=True,text=True,check=True,timeout=5)
+ return result.stdout.strip()
+
 def main():
+ # Fail before staging, RPCs or child creation if this is not an empty fixture bus.
+ for name in ['io.github.igpu_man.Collector','io.github.igpu_man.Dashboard','org.freedesktop.systemd1']:
+  if bus_call('NameHasOwner',name)!='b false':
+   raise SystemExit('Refusing existing Sidecar/user-manager bus owners; use an isolated test bus')
  with tempfile.TemporaryDirectory(prefix='sidecar-updater-') as temporary:
   root=Path(temporary);home=root/'home';home.mkdir();prefix=home/'.local';runtime=root/'runtime';runtime.mkdir(mode=0o700)
   environment=dict(os.environ,XDG_CONFIG_HOME=str(root/'config'),XDG_DATA_HOME=str(root/'data'),XDG_STATE_HOME=str(root/'state'),XDG_RUNTIME_DIR=str(runtime))
   subprocess.run(['make',f'PREFIX={prefix}',f'USER_UNIT_DIR={prefix}/share/systemd/user','install'],cwd=ROOT,check=True,capture_output=True)
   cfg=root/'config/igpu-man/config.toml';cfg.parent.mkdir(parents=True);cfg.write_text('schema_version=1\n[[profiles]]\nname="preserve-me"\nexecutable="/usr/bin/true"\ngpu="0000:00:02.0"\n')
   autostart=root/'config/autostart/igpu-man.desktop';autostart.parent.mkdir();autostart.write_text('user-owned autostart unchanged\n')
+  routing=root/'data/igpu-man/normal-launches.json';routing.parent.mkdir(parents=True,exist_ok=True);routing.write_text('{"schema_version":1,"entries":{}}\n');routing.chmod(0o600)
+  original_routing=routing.read_bytes()
   original_cfg=cfg.read_bytes();original_autostart=autostart.read_bytes()
   original_run=u.run;child=None
   class Manager:
@@ -28,6 +38,7 @@ def main():
      if override.exists():env['IGPU_MAN_UPDATE_TOKEN']=override.read_text().strip().split('IGPU_MAN_UPDATE_TOKEN=')[-1]
      child=subprocess.Popen([str(prefix/'bin/igpu-mand')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
      u.wait_ready()
+     assert child.poll() is None and bus_call('GetConnectionUnixProcessID','io.github.igpu_man.Collector')==f'u {child.pid}', 'Fixture collector does not own its expected bus name'
    def property(self,key):
     return {'FragmentPath':str(prefix/'share/systemd/user/igpu-man.service'),'ActiveState':'active' if child and child.poll() is None else 'inactive','MainPID':str(child.pid if child else 0)}[key]
   manager=Manager()
@@ -39,8 +50,15 @@ def main():
     manager.service('start')
     record=u.rpc('start',{'label':'saved-recording'});u.rpc('stop',{'expected_id':record})
     profiles=u.rpc('profiles');records=u.rpc('recordings')
+    # A nested invocation must refuse this occupied private bus before touching data.
+    refused=subprocess.run([sys.executable,str(Path(__file__).resolve())],capture_output=True,text=True,timeout=5)
+    assert refused.returncode!=0 and 'Refusing existing' in refused.stderr
+    assert child.poll() is None and u.rpc('profiles')==profiles and u.rpc('recordings')==records
     with patch('sys.argv',['update_user','--prefix',str(prefix)]):u.main()
     assert cfg.read_bytes()==original_cfg and autostart.read_bytes()==original_autostart
+    assert routing.read_bytes()==original_routing
+    backups=list((root/'state/igpu-man/updates').glob('run-*/data-backup/normal-launches.json'))
+    assert backups and all(p.read_bytes()==original_routing and p.stat().st_mode&0o777==0o600 for p in backups)
     assert u.rpc('profiles')==profiles and u.rpc('recordings')==records
     assert child.poll() is None
     # Updating during capture must not stop, replace or change the active recording.
@@ -57,6 +75,9 @@ def main():
      except u.UpdateError:pass
     assert child.poll() is None and all(u.sha(prefix/'bin'/n)==h for n,h in hashes.items())
     assert cfg.read_bytes()==original_cfg and autostart.read_bytes()==original_autostart
+    assert routing.read_bytes()==original_routing
+    backups=list((root/'state/igpu-man/updates').glob('run-*/data-backup/normal-launches.json'))
+    assert backups and all(p.read_bytes()==original_routing and p.stat().st_mode&0o777==0o600 for p in backups)
     journals=[json.loads(p.read_text())['phase'] for p in (root/'state/igpu-man/updates').glob('run-*/journal.json')]
     assert 'complete' in journals and 'rolled_back' in journals
     # Interrupted deployment with an inactive service can be recovered explicitly.
@@ -78,4 +99,9 @@ def main():
     print('PASS: real-collector update preserves config/records/autostart, active capture refused, restart failure rolls programs back, data backup/transaction bounds hold')
   finally:
    if child and child.poll() is None:child.terminate();child.wait(timeout=10)
-if __name__=='__main__':main()
+if __name__=='__main__':
+ # Self-isolate even when a human forgets dbus-run-session. The occupied-bus
+ # refusal above and owned-peer checks remain independent defenses.
+ if os.environ.get('_SIDECAR_UPDATER_TEST_BUS')!='1':
+  raise SystemExit(subprocess.call(['dbus-run-session','--',sys.executable,str(Path(__file__).resolve())],env=dict(os.environ,_SIDECAR_UPDATER_TEST_BUS='1')))
+ main()

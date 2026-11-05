@@ -5,6 +5,7 @@ Build the desktop with --features screenshot, then run:
 python3 tests/live_session_smoke.py /tmp/igpu-man-live.png
 Refuses to run if a collector already owns the session-bus name.
 """
+from fixture_bus import COLLECTOR, DASHBOARD, require_unowned, require_collector
 import json
 import os
 from pathlib import Path
@@ -18,9 +19,7 @@ BIN = ROOT / "target/debug"
 
 
 def main():
-    existing = subprocess.check_output(["qdbus6", "org.freedesktop.DBus", "/org/freedesktop/DBus",
-                                       "org.freedesktop.DBus.NameHasOwner", "io.github.igpu_man.Collector"], text=True)
-    assert existing.strip() == "false", "A collector is already running; leave it untouched"
+    require_unowned(COLLECTOR, DASHBOARD)
     with tempfile.TemporaryDirectory(prefix="igpu-man-live-") as temporary:
         root = Path(temporary)
         environment = dict(os.environ, XDG_STATE_HOME=str(root / "state"), XDG_CONFIG_HOME=str(root / "config"), XDG_DATA_HOME=str(root / "data"))
@@ -30,6 +29,7 @@ def main():
                 result = subprocess.run([str(BIN / "igpu-man"), "status", "--json"], env=environment,
                                         capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
+                    require_collector(daemon)
                     snapshot = json.loads(result.stdout)
                     break
                 time.sleep(.1)

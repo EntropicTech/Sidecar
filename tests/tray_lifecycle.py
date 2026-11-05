@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Real native window destruction/recreation on private SNI or actual Plasma."""
+from fixture_bus import require_empty
 import argparse,json,os,subprocess,tempfile,time
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 BIN=Path(os.environ.get('IGPU_MAN_BIN_DIR',ROOT/'target/debug'))
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--live',action='store_true');parser.add_argument('--report',type=Path);args=parser.parse_args()
+    if not args.live:require_empty()
     results={'live_plasma':args.live,'cycles':[]}
     with tempfile.TemporaryDirectory(prefix='sidecar-tray-') as temporary:
         env={k:v for k,v in os.environ.items() if not k.startswith('IGPU_MAN_SCREENSHOT_')}
@@ -15,6 +17,7 @@ def main():
         def wait(predicate):
             for _ in range(150):
                 s=status()
+                if s.get("running"):assert s.get("pid")==child.pid,"Unexpected dashboard owner"
                 if predicate(s):return s
                 assert child.poll() is None,Path(temporary+'/gui.stderr').read_text()[-5000:]
                 time.sleep(.04)

@@ -5,6 +5,7 @@ Build release binaries first, then:
 dbus-run-session -- python3 tests/measure_runtime.py /tmp/igpu-man-runtime.json
 Opens the dashboard briefly; no games, browser restarts, or system tuning.
 """
+from fixture_bus import require_empty, require_collector
 import argparse
 import json
 import hashlib
@@ -37,6 +38,7 @@ def main():
     parser.add_argument("--seconds", type=float, default=30)
     parser.add_argument("--warmup", type=float, default=0)
     args = parser.parse_args()
+    require_empty()
     if not 10 <= args.seconds <= 300 or not 0 <= args.warmup <= 60:
         parser.error("Use 10–300 measurement seconds and 0–60 warm-up seconds")
     workflow = args.workflow
@@ -74,6 +76,13 @@ def main():
             files=list((root/"state/igpu-man/logs").glob("*.jsonl*"))
             output["diagnostic_log_bytes"]=sum(path.stat().st_size for path in files)
             output["diagnostic_log_lines"]=sum(sum(1 for _ in path.open()) for path in files)
+            # Probe after the CPU interval so client startup does not skew that interval.
+            latencies = []
+            for _ in range(8):
+                probe_started = time.monotonic()
+                json.loads(cli("status", "--json"))
+                latencies.append((time.monotonic() - probe_started) * 1000)
+            output["status_cli_latency_ms"] = {"calls": len(latencies), "min": min(latencies), "max": max(latencies)}
             results["modes"].append(output)
             print(json.dumps(output), flush=True)
 
@@ -81,6 +90,7 @@ def main():
             for _ in range(100):
                 try:
                     snapshot = json.loads(cli("status", "--json"))
+                    require_collector(daemon)
                     break
                 except subprocess.CalledProcessError:
                     time.sleep(.1)

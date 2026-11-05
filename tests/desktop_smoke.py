@@ -4,6 +4,7 @@
 cargo build -p igpu-man-desktop --features screenshot
 dbus-run-session -- python3 tests/desktop_smoke.py /tmp/igpu-man-dashboard.png
 """
+from fixture_bus import require_empty, require_collector
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ BIN = ROOT / "target/debug"
 
 
 def main():
+    require_empty()
     screenshot = Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="igpu-man-desktop-") as temporary:
         root = Path(temporary)
@@ -27,6 +29,7 @@ def main():
                 result = subprocess.run([str(BIN / "igpu-man"), "status", "--json"], env=environment,
                                         text=True, capture_output=True, timeout=5)
                 if result.returncode == 0:
+                    require_collector(daemon)
                     snapshot = json.loads(result.stdout)
                     print("Discovered GPUs:", [(g["alias"], g["pci"]) for g in snapshot["gpus"]])
                     break
@@ -41,7 +44,7 @@ def main():
                 record_id = json.loads(cli("record", "start", label))
                 cli("record", "stop")
                 cli("record", "import", str(record_id), str(ROOT / "tests/fixtures/mangohud.csv"))
-            tabs = range(4) if "--all" in sys.argv else [int(environment.get("IGPU_MAN_SCREENSHOT_TAB", "0"))]
+            tabs = range(3) if "--all" in sys.argv else [int(environment.get("IGPU_MAN_SCREENSHOT_TAB", "0"))]
             for tab in tabs:
                 output = screenshot.with_stem(screenshot.stem + f"-{tab}") if "--all" in sys.argv else screenshot
                 environment["IGPU_MAN_SCREENSHOT_TO"] = str(output)

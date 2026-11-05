@@ -11,6 +11,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+struct CachedGpuName {
+    diagnostic: String,
+    display: Option<(String, String)>,
+    integrated: bool,
+}
+
 pub struct Collector {
     sys: PathBuf,
     proc: PathBuf,
@@ -18,7 +24,8 @@ pub struct Collector {
     cpu: BTreeMap<ProcessId, (u64, u64)>,
     pub launches: Vec<LaunchRegistration>,
     launch_members: BTreeMap<ProcessId, ProcessId>,
-    gpu_names: BTreeMap<String, String>,
+    gpu_names: BTreeMap<String, CachedGpuName>,
+    name_database: crate::gpu_names::Database,
     gpu_fds: BTreeMap<ProcessId, (u64, Vec<std::ffi::OsString>)>,
     known_gpus: BTreeSet<String>,
     pub diagnostics: Diagnostics,
@@ -36,9 +43,20 @@ impl Collector {
         proc: impl Into<PathBuf>,
         diagnostics: Diagnostics,
     ) -> Self {
+        let sys = sys.into();
+        let proc = proc.into();
+        let name_database = if sys == Path::new("/sys") {
+            crate::gpu_names::Database::load(
+                Path::new("/usr/share/libdrm/amdgpu.ids"),
+                &proc.join("cpuinfo"),
+            )
+        } else {
+            crate::gpu_names::Database::default()
+        };
         Self {
-            sys: sys.into(),
-            proc: proc.into(),
+            sys,
+            proc,
+            name_database,
             counters: EngineCounters::default(),
             cpu: BTreeMap::new(),
             launches: Vec::new(),
@@ -53,14 +71,32 @@ impl Collector {
         let started = Instant::now();
         let now = monotonic_ns();
         let mut gpus = discover_gpus(&self.sys, config);
+        self.gpu_names.retain(|pci, cached| {
+            gpus.iter()
+                .any(|g| &g.pci == pci && g.integrated == cached.integrated)
+        });
         for gpu in &mut gpus {
             if self.sys == Path::new("/sys") {
                 let name = self.gpu_names.entry(gpu.pci.clone()).or_insert_with(|| {
-                    command_output("lspci", &["-s", &gpu.pci])
+                    let raw = command_output("lspci", &["-s", &gpu.pci])
                         .and_then(|s| s.trim().split_once(": ").map(|(_, name)| name.to_owned()))
-                        .unwrap_or_else(|| gpu.name.clone())
+                        .unwrap_or_else(|| gpu.name.clone());
+                    let device = self
+                        .sys
+                        .join("class/drm")
+                        .join(gpu.card.rsplit('/').next().unwrap_or(""))
+                        .join("device");
+                    CachedGpuName {
+                        diagnostic: raw,
+                        display: self.name_database.label(&device, gpu.integrated),
+                        integrated: gpu.integrated,
+                    }
                 });
-                gpu.name = name.clone();
+                gpu.name = name.diagnostic.clone();
+                if let Some((display, source)) = &name.display {
+                    gpu.display_name = Some(display.clone());
+                    gpu.display_name_source = Some(source.clone());
+                }
             }
         }
         apply_display_configuration(&mut gpus, self.diagnostics.display_configuration.as_ref());
@@ -536,6 +572,8 @@ pub fn discover_gpus(sys: &Path, config: &Config) -> Vec<Gpu> {
         result.push(Gpu {
             pci,
             name: product,
+            display_name: None,
+            display_name_source: None,
             alias,
             integrated,
             card: format!("/dev/dri/{card}"),
@@ -583,45 +621,83 @@ pub fn clock_ticks_per_second() -> f64 {
     unsafe { libc::sysconf(libc::_SC_CLK_TCK) }.max(1) as f64
 }
 
-/// Subprocesses are diagnostics only, bounded to avoid hanging the sampler.
+/// Subprocesses are diagnostics only. Capture never touches disk and rejects
+/// output over 64 KiB; both output size and lifetime are bounded while reading.
 pub fn command_output(program: &str, args: &[&str]) -> Option<String> {
-    let output_path = std::env::temp_dir().join(format!(
-        "igpu-man-diag-{}-{}",
-        std::process::id(),
-        monotonic_ns()
-    ));
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&output_path)
-        .ok()?;
-    let child = Command::new(program)
-        .args(args)
-        .stdout(file)
+    let mut command = Command::new(program);
+    command.args(args);
+    diagnostic_output(command, Duration::from_secs(2), 64 * 1024)
+}
+
+fn diagnostic_output(mut command: Command, timeout: Duration, limit: usize) -> Option<String> {
+    use std::{io::Read, os::fd::AsRawFd};
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .spawn();
+        .spawn()
+        .ok()?;
     let result = (|| {
-        let mut child = child.ok()?;
+        let mut stdout = child.stdout.take()?;
+        let fd = stdout.as_raw_fd();
+        // This descriptor is owned and remains alive throughout both fcntl calls.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return None;
+        }
         let started = Instant::now();
+        let mut output = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let mut eof = false;
         loop {
-            if let Some(status) = child.try_wait().ok()? {
-                return status
-                    .success()
-                    .then(|| fs::read_to_string(&output_path).ok())
-                    .flatten();
-            }
-            if started.elapsed() > Duration::from_secs(2) {
-                let _ = child.kill();
-                let _ = child.wait();
+            if started.elapsed() >= timeout {
                 return None;
+            }
+            if !eof {
+                match stdout.read(&mut buffer) {
+                    Ok(0) => eof = true,
+                    Ok(count) => {
+                        if count > limit.saturating_sub(output.len()) {
+                            return None;
+                        }
+                        output.extend_from_slice(&buffer[..count]);
+                        continue;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(_) => return None,
+                }
+            }
+            if let Some(status) = child.try_wait().ok()? {
+                if eof {
+                    return status
+                        .success()
+                        .then(|| String::from_utf8(output).ok())
+                        .flatten();
+                }
             }
             std::thread::sleep(Duration::from_millis(10));
         }
     })();
-    let _ = fs::remove_file(output_path);
-    result.map(|s| s.chars().take(65536).collect())
+    // Reap the helper on every path, including oversized output and capture errors.
+    // Never terminate unrelated applications or descendants discovered elsewhere.
+    if !matches!(child.try_wait(), Ok(Some(_))) {
+        if let Err(error) = child.kill() {
+            crate::logging::event(
+                "warn",
+                "diagnostic.kill_failed",
+                serde_json::json!({"io_kind":format!("{:?}",error.kind())}),
+            );
+        }
+        if let Err(error) = child.wait() {
+            crate::logging::event(
+                "warn",
+                "diagnostic.reap_failed",
+                serde_json::json!({"io_kind":format!("{:?}",error.kind())}),
+            );
+        }
+    }
+    result
 }
 
 fn software_versions() -> BTreeMap<String, String> {
@@ -751,6 +827,45 @@ fn apply_display_configuration(gpus: &mut [Gpu], configuration: Option<&serde_js
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn diagnostic_capture_bounds_output_and_reaps_failed_or_timed_out_helpers() {
+        fn probe(script: &str, limit: usize, timeout: Duration) -> Option<String> {
+            let mut command = Command::new("python3");
+            command.args(["-c", script]);
+            diagnostic_output(command, timeout, limit)
+        }
+        let timeout = Duration::from_secs(2);
+        assert_eq!(
+            probe("print('ok',end='')", 2, timeout).as_deref(),
+            Some("ok")
+        );
+        assert!(probe("print('large')", 2, timeout).is_none());
+        assert!(probe("import os; os.write(1,b'\\xff')", 8, timeout).is_none());
+        assert!(probe("raise SystemExit(2)", 8, timeout).is_none());
+        assert!(probe(
+            "import os; b=b'x'*4096\nwhile True: os.write(1,b)",
+            64 * 1024,
+            timeout
+        )
+        .is_none());
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let mut command = Command::new("python3");
+        command
+            .args([
+                "-c",
+                "import os,sys,time; open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(10)",
+            ])
+            .arg(&pid_file);
+        let started = Instant::now();
+        assert!(diagnostic_output(command, Duration::from_millis(400), 64).is_none());
+        assert!(started.elapsed() < Duration::from_secs(3));
+        let pid = fs::read_to_string(pid_file).unwrap();
+        assert!(
+            !Path::new("/proc").join(pid).exists(),
+            "Timed-out helper must be reaped"
+        );
+    }
     #[test]
     fn version_probes_are_cached_until_identity_changes_or_expiry_including_missing_tools() {
         use super::*;
@@ -899,6 +1014,47 @@ mod tests {
         fs::remove_dir_all(sys.join("class/drm/card8")).unwrap();
         assert!(collector.sample(&Config::default()).gpus.is_empty());
     }
+    #[test]
+    fn optional_labels_preserve_old_samples_and_drop_disappeared_or_reclassified_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let sys = dir.path().join("sys");
+        let proc = dir.path().join("proc");
+        fs::create_dir(&proc).unwrap();
+        sys_fixture(&sys);
+        let mut collector = Collector::new(
+            &sys,
+            &proc,
+            Diagnostics {
+                session: "fixture".into(),
+                kwin_support: None,
+                display_configuration: None,
+                versions: BTreeMap::new(),
+                notes: vec![],
+            },
+        );
+        let sample = collector.sample(&Config::default());
+        let mut old = serde_json::to_value(&sample.gpus[0]).unwrap();
+        old.as_object_mut().unwrap().remove("display_name");
+        old.as_object_mut().unwrap().remove("display_name_source");
+        let restored: Gpu = serde_json::from_value(old).unwrap();
+        assert_eq!(restored.pci, sample.gpus[0].pci);
+        assert!(restored.display_name.is_none() && restored.display_name_source.is_none());
+        let cached = || CachedGpuName {
+            diagnostic: "Old device".into(),
+            display: Some(("Old label".into(), "fixture".into())),
+            integrated: true,
+        };
+        collector.gpu_names.insert(restored.pci.clone(), cached());
+        let mut config = Config::default();
+        config.aliases.insert("igpu".into(), "0000:ff:00.0".into());
+        collector.sample(&config);
+        assert!(!collector.gpu_names.contains_key(&restored.pci));
+        collector.gpu_names.insert(restored.pci.clone(), cached());
+        fs::remove_dir_all(sys.join("class/drm/card8")).unwrap();
+        collector.sample(&Config::default());
+        assert!(collector.gpu_names.is_empty());
+    }
+
     #[test]
     fn permission_error_is_reported_separately() {
         let mut coverage = Coverage::default();

@@ -1,0 +1,20 @@
+name: security
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '19 9 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      # Vulnerabilities fail. Maintenance notices remain visible; see docs/security.md.
+      - run: cargo audit --file Cargo.lock --deny unsound --deny yanked

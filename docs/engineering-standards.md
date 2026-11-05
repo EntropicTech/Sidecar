@@ -181,3 +181,125 @@ runtime environment. Validate real tray/IPC progress, sampling under concurrent
 recording reads, failure recovery, CPU/RSS and OS thread counts; fewer threads do
 not by themselves prove lower CPU, lower physical RAM or better game frametimes.
 Dependency-owned runtimes must be included when explaining total thread counts.
+
+
+## Security maintenance
+
+Apply [security boundaries](security.md): transmit private trial settings through
+bounded stdin, reject caller-supplied recovery intents, and acquire API admission
+before parsing or cloning state. Retain permits in blocking jobs after caller
+cancellation. Diagnostic capture must enforce byte/time limits during reading,
+without growing temporary files or logging raw output.
+
+Pin external workflow actions to full upstream commit SHAs; keep checkout
+credentials out of build working trees. Run `make security-check` before releases.
+CI runs advisory checks weekly and on changes; vulnerabilities, unsound notices
+and yanked crates fail, maintenance notices remain visible and tracked. Do not
+hide notices with blanket ignores or automatically merge dependency updates.
+
+
+Collector unit hardening must preserve its authorized cross-process procfs access.
+The reviewed compatibility policy disables PrivateTmp/ProtectSystem/PrivateUsers
+only for Sidecar's user service, retaining NoNewPrivileges, restrictive umask and
+private data. Never silently reintroduce namespaces or compensate with ptrace/root
+privileges. Verify actual unit properties and cross-process coverage after updates;
+standalone fixture success alone is insufficient. See [security](security.md).
+
+
+Notes editors must bind drafts and save payloads to recording identity; inspecting
+another run or refreshing a catalog cannot substitute its notes. Preserve unsaved
+drafts while parked and prune deleted/replaced identities. Reject duplicate run
+IDs in comparisons; distinguish missing settings from matching settings, normalize
+ephemeral launch metadata, and do not echo sensitive values in mismatch warnings.
+
+Mark export bundles incomplete before any payload is written, sync the marker,
+and remove it only after synced completion. Error-only cleanup cannot cover abrupt
+exit. Regression coverage must include a real owned-process interruption with
+private data, successful retry and preserved destination conflicts. Keep durability
+work outside the sampler and document uncertain timeout outcomes.
+
+
+Native Close acceptance must independently verify compositor window removal, not
+only internal visibility/tray flags. Detach repaint callbacks before tearing down
+GL, and do not report residency until deferred native retirement has completed.
+Exercise title-bar and API Close, same-process reopen, parked idle behavior and
+Quit. A windowless one-shot cleanup cycle must not become periodic polling.
+
+Checked-in compatibility sources require an upstream archive checksum, unchanged
+file hashes, exact reversible diff, licenses, build-identity/distribution coverage
+and a removal criterion. Verify before compilation; never silently modify Cargo
+registry/system library files. Keep crash/core diagnostics local and narrowly
+filter journals by owned process/component.
+
+## Desktop routing changes
+
+Normal-launch setup must have a fresh preview, durable private undo intent and
+explicit conflict handling. Never accept arbitrary artifact text/paths from RPCs,
+follow destination symlinks, restore a whole MIME/session configuration over
+unrelated edits, or delete recovery state after partial failure. Fail visibly on
+unknown journal schema/corruption. Normal routing emits only `normal_launch.applied`
+and `normal_launch.undone` events with allowlisted option flags; never log original
+launcher bytes, handler values, profile payloads or URL inputs. Desktop launch
+failure notifications use fixed text. Preview/Apply/Resume/Undo use bounded jobs
+and calls; no route polling is added while parked. Configuration/placement claims
+stay distinct. New routes require opt-in; deployment is not permission to change
+all saved applications' defaults.
+
+
+## Primary usability contract
+
+The default task is Applications → Add app → Use iGPU → observe → Undo. Never
+require named profiles, a trial, a recording or a second launcher setup for the
+ordinary supported case. Keep custom profiles in Launch Settings and preserve optional CLI data. New app setup must not create startup entries or edit session restore;
+legacy retirement alone may reverse earlier owned changes. Sidecar tray startup
+is independent. Keep configured intent distinct from observed rendering/decoding,
+and reject inherited automatic confirmation when a settings name changes intent.
+Do not add executable resolution, full launcher/profile copies or recording catalog
+polls to main-view redraws. Preserve preview purity and prepared-profile recovery.
+
+Applications styling should emphasize setup actions and measured evidence separately.
+Keep Undo discoverable, surface conflicts outside collapsed details, and make narrow
+layouts readable. Use existing data and embedded/painter visuals; a style pass must
+not add icon-directory scans, animation timers or telemetry work. Inspect fixture
+captures at normal and narrow widths rather than testing pixel/style constants.
+
+Optional hardware labels must preserve raw diagnostics and PCI identity, reject
+ambiguous ID matches, and deserialize older samples without them. Cache local
+metadata outside recurring sampling work, bound reads, and identify CPU context
+as distinct from a GPU model. Keep unknown sensor states visible and retain
+partial-coverage warnings when simplifying diagnostic-heavy views.
+
+Advanced presentation must preserve request payloads, confirmation/conflict gates,
+recording note identity and independent inspection. Programmatically opened editors
+need explicit persistent IDs across nested menu scopes; cover reveal/persistence
+with a headless UI transition check. Missing numeric statistics are availability
+states, not zero. Keep destructive actions deliberate and heavy recording tools
+on demand; visual refinement cannot add periodic work or discard hidden drafts.
+
+Test harnesses that mutate local services must enforce isolation themselves:
+require an empty fixture bus and verify the owned peer PID before mutations.
+Temporary XDG paths and a mocked service manager do not isolate session D-Bus.
+Add a refusal regression before staging or recording creation; cleanup may touch
+only exact fixture identities. Updater fixtures self-spawn an isolated bus when
+invoked directly, so a missing command prefix cannot target the live desktop.
+
+Runtime navigation is Applications, GPU Activity and Launch Settings only. Retired
+view IDs must normalize to Applications before publishing control/polling state;
+validation-only widget access cannot be restored through runtime environment
+variables. Maintain the release native navigation check when changing fixture guards.
+
+
+All launcher publication paths, including explicit saved-profile shortcuts, must
+use the shared atomic no-clobber primitive. Never use raw write/truncate on a
+launcher destination. Keep disk work off the UI thread. Dashboard work admission
+must be bounded and nonblocking, restore rejected pending state, and expose busy
+versus stopped errors without logging payloads. Lifecycle control stays independent.
+
+Mutating test fixtures must call the shared `tests/fixture_bus.py` admission guard
+before staging/launch and verify the spawned collector's bus-owner PID before
+mutations. Temporary XDG roots alone are insufficient. Use an occupied private bus
+for refusal regressions; never use an installed service as a negative-test target.
+
+The offline check target and CI compile all Python fixture/packaging modules for
+syntax validity as well as checking Rust formatting, Clippy and documentation.
+Bus guards do not substitute for real interprocess regression coverage.

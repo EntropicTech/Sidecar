@@ -22,6 +22,13 @@ pub(super) struct Backend {
     pub(super) trial_keep_pending: bool,
     pub(super) managed_elsewhere: Vec<String>,
     pub(super) workflow_notice: String,
+    pub(super) normal_status: Vec<igpu_core::normal_launch::Status>,
+    pub(super) app_preview: Option<igpu_core::normal_launch::AppPreview>,
+    pub(super) launcher_matches: BTreeMap<String, Vec<String>>,
+    pub(super) normal_preview: Option<igpu_core::normal_launch::Preview>,
+    pub(super) normal_busy: bool,
+    pub(super) normal_checked: Option<Instant>,
+    pub(super) normal_verification: Option<(ProcessId, igpu_core::applications::Verification)>,
     pub(super) recording_generation: u64,
     pub(super) recording_busy: bool,
 }
@@ -71,4 +78,25 @@ pub(super) fn backend_recovered(state: &mut Backend, operation: &'static str) {
             json!({"operation":operation}),
         );
     }
+}
+
+/// Resolve installed executable aliases once per catalog refresh, never on redraw.
+pub(super) fn launcher_matches(
+    entries: &[igpu_core::launchers::InstalledLauncher],
+) -> BTreeMap<String, Vec<String>> {
+    let mut result: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for entry in entries {
+        if let Some(profile) = &entry.profile {
+            let mut keys = vec![profile.executable.clone()];
+            if let Some(path) = igpu_core::launchers::executable_path(&profile.executable) {
+                keys.push(path.to_string_lossy().into_owned());
+            }
+            keys.sort();
+            keys.dedup();
+            for key in keys {
+                result.entry(key).or_default().push(entry.id.clone());
+            }
+        }
+    }
+    result
 }

@@ -24,10 +24,29 @@ Run variation is a
 min–max range, not a confidence interval. Averages of telemetry readings are
 sample means, not energy integrals.
 
-The comparison flags changes in recorded environment/monitor metadata. The
-software cannot detect an unrecorded game-setting or video-content difference.
-Profiles and launch preferences are retained separately because the GPU target
-is intentionally different between conditions.
+Comparisons require distinct recording IDs, so a single run cannot inflate the
+repeat count. They flag changes in recorded environment/monitor metadata, normal
+and recording intervals, stutter threshold and stable explicit launch settings:
+executable, arguments, GPU target, Firefox/Vulkan options, recording/MangoHud
+options, explicit environment assignments, working directory and launcher argument
+positions. Process identities, anchors, verification times, launcher presentation
+and profile names are excluded. Launch order is normalized; repeated instances
+remain separate. Unused saved-profile changes do not override known launch evidence.
+
+A changed GPU target can be the intended condition; warnings are review prompts,
+not failed experiments or causal evidence. Missing environment, sampling or launch
+settings make comparability unverified. When effective launch settings are missing,
+saved-profile differences are reported as catalog context, not proof of what ran.
+The software cannot detect unrecorded settings, forwarded file/URL arguments or
+video-content differences. No additional process arguments/environments are scraped.
+
+The dashboard no longer has placement-experiment or recording pages. Use the
+[recording CLI commands](cli.md#optional-recordings-and-experiments) for notes, import, comparison and
+export; saved data remains compatible. Optional legacy widget captures are test
+fixtures, not installed navigation.
+A partial export keeps an INCOMPLETE marker, including after abrupt collector exit.
+Retry to a fresh directory; inspect the saved recording rather than trusting a
+partial bundle. Export synchronization remains subject to filesystem guarantees.
 
 After a driver, kernel, or compositor update, repeat the same experiment.
 Do not infer a regression from a single run. A result smaller than normal

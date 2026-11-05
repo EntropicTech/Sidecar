@@ -117,6 +117,15 @@ impl Config {
     }
 }
 
+/// Public launch/save inputs cannot manufacture durable launcher-recovery state.
+pub fn validate_profile_input(profile: &Profile) -> Result<()> {
+    anyhow::ensure!(
+        profile.pending_launcher.is_none(),
+        "Pending launcher intent is internal recovery state, not a profile input"
+    );
+    validate_profile(profile)
+}
+
 pub fn validate_profile(profile: &Profile) -> Result<()> {
     if let Some(pending) = &profile.pending_launcher {
         anyhow::ensure!(

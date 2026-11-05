@@ -7,6 +7,7 @@ Live mode uses the Plasma tray but never changes the real collector's state.
 Refuses to touch a pre-existing dashboard. Private mode also tests a paused
 collector and an active recording using only its own temporary daemon/data.
 """
+from fixture_bus import require_empty, require_collector
 import argparse
 import json
 import os
@@ -28,7 +29,10 @@ def main():
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--cycles", type=int, default=8)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--runtime-navigation", action="store_true", help="Validate that release builds ignore retired-view fixture settings")
     args = parser.parse_args()
+    if not args.live:
+        require_empty()
     with tempfile.TemporaryDirectory(prefix="igpu-man-lifecycle-") as temporary:
         root = Path(temporary)
         environment = {k: v for k, v in os.environ.items() if not k.startswith("IGPU_MAN_SCREENSHOT_")}
@@ -105,12 +109,24 @@ def main():
                 for _ in range(100):
                     try:
                         cli("status", "--json")
+                        require_collector(daemon)
                         break
                     except subprocess.CalledProcessError:
                         time.sleep(.05)
                 else:
                     raise AssertionError("Temporary collector did not start")
                 recording = cli("record", "start", "lifecycle-recording")
+            if args.runtime_navigation:
+                environment.update(IGPU_MAN_SCREENSHOT_TAB="4", IGPU_MAN_SCREENSHOT_WORKFLOW="catalog")
+                child = spawn(); state = ready(child)
+                for _ in range(100):
+                    state = status()
+                    if state.get("updates", 0) >= 2: break
+                    time.sleep(.05)
+                assert state.get("view") == 1, "A retired view escaped into runtime navigation; use release binaries for this check"
+                finish(child, "quit", state)
+                environment.pop("IGPU_MAN_SCREENSHOT_TAB"); environment.pop("IGPU_MAN_SCREENSHOT_WORKFLOW")
+                print("PASS: runtime ignores retired-view fixture settings and opens Applications", flush=True)
             for cycle in range(args.cycles):
                 child = spawn()
                 state = ready(child)

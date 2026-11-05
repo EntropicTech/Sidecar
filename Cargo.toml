@@ -1,6 +1,7 @@
 [workspace]
 members = ["crates/core", "crates/daemon", "crates/cli", "crates/desktop"]
 resolver = "2"
+exclude = ["vendor/eframe-0.31.1"]
 
 [workspace.package]
 version = "0.1.0"
@@ -27,3 +28,7 @@ tempfile = "3"
 [profile.release]
 lto = "thin"
 strip = true
+
+# Reviewed native-window retirement fix; see vendor/README.md.
+[patch.crates-io]
+eframe = { path = "vendor/eframe-0.31.1" }

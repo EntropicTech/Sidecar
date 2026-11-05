@@ -128,6 +128,8 @@ class FileTransaction:
 def backup_data(destination,config,data):
     destination.mkdir(mode=0o700)
     if config.exists():atomic(destination/'config.toml',config.read_bytes())
+    routing=data/'normal-launches.json'
+    if routing.exists():atomic(destination/'normal-launches.json',routing.read_bytes())
     database=data/'recordings.sqlite'
     if database.exists():
         with sqlite3.connect(database.as_uri()+'?mode=ro',uri=True) as source:

@@ -57,6 +57,10 @@ pub struct Output {
 pub struct Gpu {
     pub pci: String,
     pub name: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub display_name_source: Option<String>,
     pub alias: String,
     pub integrated: bool,
     pub card: String,

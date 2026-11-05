@@ -3,7 +3,7 @@
 import gzip,hashlib,io,os,shutil,subprocess,tarfile,tomllib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-INCLUDE=['Cargo.toml','Cargo.lock','Makefile','LICENSE','README.md','AGENTS.md','CONTRIBUTING.md','.gitignore','.github','crates','data','docs','tests','packaging','CHANGELOG.md','SECURITY.md']
+INCLUDE=['Cargo.toml','Cargo.lock','Makefile','LICENSE','README.md','AGENTS.md','CONTRIBUTING.md','.gitignore','.github','crates','vendor','data','docs','tests','packaging','CHANGELOG.md','SECURITY.md']
 def main():
  version=tomllib.loads((ROOT/'Cargo.toml').read_text())['workspace']['package']['version']
  dist=ROOT/'dist';dist.mkdir(exist_ok=True)

@@ -4,6 +4,7 @@
 IGPU_MAN_BIN_DIR selects a before/after build; --baseline reports rather than
 asserting the expected older lock stall. --native checks dashboard telemetry too.
 """
+from fixture_bus import require_empty, require_collector
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -19,6 +20,7 @@ ROOT=Path(__file__).resolve().parents[1]
 BIN=Path(os.environ.get('IGPU_MAN_BIN_DIR',ROOT/'target/debug'))
 
 def main():
+    require_empty()
     parser=argparse.ArgumentParser()
     parser.add_argument('--baseline',action='store_true')
     parser.add_argument('--native',action='store_true')
@@ -38,7 +40,9 @@ def main():
             p=subprocess.Popen([str(BIN/'igpu-mand')],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             for _ in range(100):
                 result=cli('status','--json',check=False,timeout=5)
-                if result.returncode==0:return p,json.loads(result.stdout)
+                if result.returncode==0:
+                    require_collector(p)
+                    return p,json.loads(result.stdout)
                 assert p.poll() is None,'Test collector exited'
                 time.sleep(.05)
             raise AssertionError('Test collector unavailable')

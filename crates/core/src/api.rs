@@ -24,9 +24,18 @@ operations! {
     SetManagement => "set_management",
     VerifyTrial => "verify_trial",
     KeepTrial => "keep_trial",
+    AppRoutePreview => "app_route_preview",
+    AppRouteApply => "app_route_apply",
+    NormalLaunchRemoveLogin => "normal_launch_remove_login",
+    NormalLaunchPreview => "normal_launch_preview",
+    NormalLaunchStatus => "normal_launch_status",
+    NormalLaunchApply => "normal_launch_apply",
+    NormalLaunchResume => "normal_launch_resume",
+    NormalLaunchUndo => "normal_launch_undo",
     Profiles => "profiles",
     SaveProfile => "save_profile",
     DeleteProfile => "delete_profile",
+    CreateLauncher => "create_launcher",
     RegisterLaunch => "register_launch",
     Start => "start",
     Stop => "stop",
@@ -64,7 +73,10 @@ impl Operation {
     pub fn read_job(self) -> bool {
         matches!(
             self,
-            Self::Recordings
+            Self::AppRoutePreview
+                | Self::NormalLaunchPreview
+                | Self::NormalLaunchStatus
+                | Self::Recordings
                 | Self::Detail
                 | Self::Samples
                 | Self::SamplesPage
@@ -94,7 +106,15 @@ impl Operation {
     pub fn large(self) -> bool {
         matches!(
             self,
-            Self::Import
+            Self::AppRoutePreview
+                | Self::AppRouteApply
+                | Self::NormalLaunchRemoveLogin
+                | Self::NormalLaunchStatus
+                | Self::NormalLaunchPreview
+                | Self::NormalLaunchApply
+                | Self::NormalLaunchResume
+                | Self::NormalLaunchUndo
+                | Self::Import
                 | Self::Export
                 | Self::Samples
                 | Self::SamplesPage
@@ -110,13 +130,19 @@ impl Operation {
     pub fn mutation(self) -> bool {
         matches!(
             self,
-            Self::PrepareUpdate
+            Self::AppRouteApply
+                | Self::NormalLaunchRemoveLogin
+                | Self::NormalLaunchApply
+                | Self::NormalLaunchResume
+                | Self::NormalLaunchUndo
+                | Self::PrepareUpdate
                 | Self::CancelUpdate
                 | Self::DiscardTrial
                 | Self::SetManagement
                 | Self::KeepTrial
                 | Self::SaveProfile
                 | Self::DeleteProfile
+                | Self::CreateLauncher
                 | Self::RegisterLaunch
                 | Self::Start
                 | Self::Stop
@@ -127,4 +153,12 @@ impl Operation {
                 | Self::DeleteRecording
         )
     }
+}
+
+/// Publish a shortcut for the authoritative saved profile, never a caller copy.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateLauncher {
+    pub name: String,
+    pub cli_path: std::path::PathBuf,
 }

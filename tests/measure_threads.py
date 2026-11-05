@@ -4,6 +4,7 @@
 Build release binaries and the debug tray_fixture example first. Results remain
 at the explicitly requested local path; do not publish machine diagnostics.
 """
+from fixture_bus import require_empty, require_collector
 import argparse
 import hashlib
 import json
@@ -33,6 +34,7 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('--seconds', type=float, default=35)
     args = parser.parse_args()
+    require_empty()
     if not 10 <= args.seconds <= 120:
         parser.error('Use 10–120 seconds per observation')
     with tempfile.TemporaryDirectory(prefix='sidecar-thread-measure-') as temp:
@@ -59,6 +61,7 @@ def main():
         try:
             children.append(subprocess.Popen([BIN/'igpu-mand'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             wait_ready('igpu-man','status','--json')
+            require_collector(children[0])
             children.append(subprocess.Popen([ROOT/'target/debug/examples/tray_fixture'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             children.append(subprocess.Popen([BIN/'igpu-man-desktop','--tray'],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             status=wait_ready('igpu-man-desktop','--status')

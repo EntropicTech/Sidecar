@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def check():
     errors = []
-    documents = [ROOT / p for p in ["README.md", "AGENTS.md", "CONTRIBUTING.md"]]
+    documents = [ROOT / p for p in ["README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md"]]
     documents += sorted((ROOT / "docs").rglob("*.md"))
     for path in documents:
         if not path.is_file():
@@ -24,6 +24,7 @@ def check():
             if not (path.parent / target).exists():
                 errors.append(f"Broken link in {path.relative_to(ROOT)}: {target}")
     readme = (ROOT / "README.md").read_text()
+    cli_reference = (ROOT / "docs/cli.md").read_text()
     index=(ROOT/"docs/README.md").read_text()
     indexed={ (ROOT/"docs"/target.split("#",1)[0]).resolve() for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)",index) if ":" not in target }
     for path in (ROOT/"docs").rglob("*.md"):
@@ -34,8 +35,8 @@ def check():
         if variant in {"TryProfile", "InternalRequest"}:  # Internal argv-preserving trial wrapper.
             continue
         command = re.sub(r"(?<!^)(?=[A-Z])", "-", variant).lower()
-        if not re.search(r"\bigpu-man\s+" + re.escape(command) + r"(?:\s|`|$)", readme):
-            errors.append(f"README missing public CLI command: igpu-man {command}")
+        if not re.search(r"\bigpu-man\s+" + re.escape(command) + r"(?:\s|`|$)", cli_reference):
+            errors.append(f"CLI reference missing public CLI command: igpu-man {command}")
     api = (ROOT / "docs/api.md").read_text()
     protocol=(ROOT/"crates/core/src/api.rs").read_text().split("operations! {",1)[1].split("}",1)[0]
     operations=set(re.findall(r'[A-Z][A-Za-z]+\s*=>\s*"([a-z_]+)"',protocol))
@@ -68,6 +69,13 @@ def check():
         errors.append("make check must enforce documentation and all-feature Clippy")
     if "Closing the window exits **both dashboard and tray**" in readme:
         errors.append("README still describes the removed unconditional exit-on-close behavior")
+    for workflow in (ROOT / ".github/workflows").glob("*.yml"):
+        for action in re.findall(r"uses:\s*([^\s#]+)", workflow.read_text()):
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[a-f0-9]{40}", action):
+                errors.append(f"Workflow action must use a full commit SHA: {workflow.name}: {action}")
+    security = (ROOT / ".github/workflows/security.yml").read_text()
+    if "cargo audit --file Cargo.lock" not in security or "schedule:" not in security:
+        errors.append("Security workflow must audit the lockfile and run on a schedule")
     if errors:
         raise AssertionError("\n".join(errors))
     print(f"PASS: {len(documents)} documents; local links, CLI/API coverage, config example, versions, packaging contracts")

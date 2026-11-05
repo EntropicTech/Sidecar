@@ -19,3 +19,6 @@ Developer updates apply only to user-owned installations. Pacman owns system
 packages; Sidecar never self-updates `/usr`. Saved data is outside installed files.
 Rollback restores programs, not user data; private consistent data backups are
 retained for explicit schema recovery. See the update/release documentation.
+
+See [security boundaries and maintenance](docs/security.md) for the account-level
+trust model, input/resource limits, advisory checks and tracked dependency notices.

@@ -2,9 +2,17 @@
 
 Read `README.md`, `docs/architecture.md`, and `docs/engineering-standards.md`
 before changing behavior. Read `docs/code-review.md` for outstanding risks and
-`docs/troubleshooting.md` before debugging a live installation.
+`docs/troubleshooting.md` before debugging a live installation. Read
+`docs/security.md` before changing input boundaries, workflow actions or dependencies.
 
 ## Product invariants
+
+- Keep Applications → Add app → Use iGPU → observe → Undo as the primary task.
+  The dashboard has only Applications, GPU Activity and Launch Settings. Custom
+  profiles belong in Launch Settings; retired trial/recording views are used only
+  for validation, with optional backend/CLI tools and saved data preserved. New app setup must
+  not edit app autostart/session restore; legacy retirement may reverse only
+  owned changes. Sidecar’s own tray autostart is independent.
 
 - Stay unprivileged and local. Never introduce uploads, root helpers, global GPU
   tuning, automatic application termination, or migration of running workloads.
@@ -12,6 +20,8 @@ before changing behavior. Read `docs/code-review.md` for outstanding risks and
   descriptor is not activity. Missing, inaccessible, stale and idle are different.
 - Rendering and video decoding are separate observations. Do not infer software
   decoding from absent decoder activity or claim gaming gains without experiments.
+- Keep private trial settings off argv and reject public launcher-recovery intents.
+  Keep API admission before parsing; retain blocking-job resource bounds.
 - Keep launches explicit, preserve argv without a shell, and preserve original
   launchers. Trials do not become saved profiles until Keep.
 - Never log browsing data, RPC payloads, raw application stdout/stderr, complete
@@ -36,6 +46,13 @@ before changing behavior. Read `docs/code-review.md` for outstanding risks and
 
 ## Required documentation updates
 
+Keep README as the concise project front page. Put install/removal details in
+`docs/setup.md`, everyday tasks/evidence in `docs/user-guide.md`, and command
+examples in `docs/cli.md`. Index every guide in `docs/README.md`; keep historical
+validation records dated and separate from current instructions. CLI coverage is
+checked against the CLI reference. Review semantics as well as automated links.
+
+
 | Change | Update in the same change |
 | --- | --- |
 | CLI, setup, defaults or window lifecycle | `README.md`, relevant troubleshooting |
@@ -58,6 +75,10 @@ changes; never publish/tag without exact-source validation and source review.
 
 - Run `make check` and `make test` for Rust/backend behavior. CI must enforce
   formatting, all-feature Clippy, unit/integration tests and documentation checks.
+- Native Wayland Close: `python3 tests/wayland_window_lifecycle.py --live --cycles 6`
+  when no real dashboard is running. Verify actual owned KWin windows disappear;
+  internal status alone cannot establish retirement. Verify compatibility sources
+  with `python3 tests/verify_vendor.py` before changing/upgrading them.
 - Tray residency: build `cargo build -p igpu-man-desktop --example tray_fixture`,
   then `dbus-run-session -- python3 tests/tray_lifecycle.py` and
   `dbus-run-session -- python3 tests/tray_startup.py`; verify actual Plasma
@@ -66,10 +87,16 @@ changes; never publish/tag without exact-source validation and source review.
   Real Plasma tray: `python3 tests/dashboard_lifecycle.py --live` only when no
   other dashboard owns the control name; never close unrelated applications.
 - GPU placement: `dbus-run-session -- python3 tests/placement_workflow.py`.
+- Normal-launch compatibility: build the core `service_fixture` example, then
+  `dbus-run-session -- python3 tests/normal_launches.py`; never test default
+  handlers, autostart edits or restoration against real user configuration.
+- Primary app routing: `dbus-run-session -- python3 tests/app_routing.py`.
 - Packaging: `make build`, then `python3 tests/packaging.py`; installation/removal
   must use its temporary DESTDIR, never the real prefix as a test.
   Render UI changes with the screenshot feature and inspect the resulting image.
 - Use isolated session buses and temporary XDG config/data/state by default.
+  Mutating fixtures must enforce an empty test bus and verify owned peer PIDs;
+  temporary XDG paths alone do not isolate D-Bus.
   Never stop the real collector or an active recording as test cleanup.
 - Report exactly what passed, what was not tested, and measured repeatability
   limits. A CI pass does not establish suspend/resume or gaming performance.

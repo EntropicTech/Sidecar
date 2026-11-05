@@ -19,8 +19,11 @@ automatically retried: a timeout leaves an uncertain outcome. The request envelo
 is limited to 70 MiB for import and 1 MiB otherwise; raw frame logs to 64 MiB and
 configuration to 1 MiB. CSV limits are one million frames/256 columns; stored frame
 encoding is capped at 128 MiB. Duplicate timing columns are rejected as ambiguous.
-Recording read jobs have a cooperative 20-second budget and two concurrent slots;
-mutations have eight separate slots. Busy errors mean the request was not queued.
+Live requests (including capabilities) have four concurrent slots, recording reads
+have two, and mutations eight. Admission precedes blocking JSON parsing and
+state cloning. Excess calls return D-Bus LimitsExceeded immediately; busy requests
+are not queued. Read/parse permits remain held until blocking work finishes, even
+if the caller cancels. Recording reads retain a cooperative 20-second budget.
 Timeline/frame arrays are limited to 64 MiB of stored JSON; export larger recordings.
 Read connections are query-only WAL snapshots, so a concurrent recording may have
 more recent data than an in-progress detail/compare/export result.
@@ -39,8 +42,17 @@ more recent data than an in-progress detail/compare/export result.
 | `cancel_update` | `{token}` | release matching lease; other nonces rejected |
 | `pending_trials` | `{}` | unkept `LaunchRegistration[]`; exact explicit launch settings retained while tracked |
 | `discard_trial` | `{process}` | boolean; removes unkept setup, retains placement attribution and leaves app running |
+| `app_route_preview` | `{desktop_id, cli_path}` | read-only primary app setup; imports original settings and selects the single iGPU; no profile saved |
+| `app_route_apply` | `{setup, token}` | create/reuse compatible settings and publish the reviewed normal-launch route; never creates startup entries |
+| `normal_launch_remove_login` | `{profile}` | retire only old app-startup/exclusion changes, preserving normal routing and other settings |
+| `normal_launch_preview` | `{profile, desktop_id, cli_path, login?: false, default_browser}` | strict setup preview, freshness token, change labels and limitations; no writes |
+| `normal_launch_status` | `{}` | saved route phase, launcher/login/defaults/exclusion checks and conflicts; no raw undo content |
+| `normal_launch_apply` | `{setup, token}` | revalidate preview, journal undo data, apply routing for a saved iGPU profile |
+| `normal_launch_resume` | `{profile}` | finish an interrupted installation; conflicting external edits are preserved |
+| `normal_launch_undo` | `{profile}` | restore owned changes, preserve unrelated settings and keep journal on conflict |
 | `profiles` | `{}` | `Profile[]` |
 | `save_profile` | `Profile` | saved profile with resolved PCI target |
+| `create_launcher` | `{name, cli_path}` | new separate launcher path; absolute CLI path, existing destinations preserved |
 | `delete_profile` | `{name}` | boolean |
 | `register_launch` | `LaunchRegistration` | boolean |
 | `start` | `{label}` | recording ID |
@@ -191,3 +203,108 @@ without events; status probes do not wake that worker. Visibility transitions
 explicitly wake it for fresh polling on reopen. Software-version diagnostics
 are cached up to five minutes; executable/package-database identity changes are
 checked on the independent 30-second display-diagnostics cadence.
+
+Non-null `Profile.pending_launcher` is internal recovery state and is rejected by
+`save_profile` and `register_launch`, including nested launch specifications.
+The hidden trial CLI receives at most 1 MiB of JSON over stdin, never argv.
+
+
+## Recording integrity
+
+`compare` rejects repeated IDs rather than counting one recording multiple times.
+The reply shape is unchanged: `mismatch_warnings` now also covers sampling
+intervals/stutter threshold and stable explicit launch settings. It ignores process
+IDs, anchors, verification timestamps, profile names and launcher presentation.
+It retains multiplicity of independent launches and normalizes their ordering.
+Missing environment/sampling/launch context produces unverified-comparability
+warnings. Saved-profile differences are fallback context only when both runs lack
+complete effective launch specifications. Warnings name categories and recording
+IDs without echoing profile argument/environment values. Deliberate GPU changes
+remain allowed and are reported for interpretation. See [experiments](experiments.md).
+
+`export` creates and syncs an INCOMPLETE marker before bundle data. All output files
+and directory entries are synced before marker removal; successful return follows
+completion synchronization. Errors or abrupt collector exit retain an incomplete
+bundle. A fresh destination is required on retry; existing directories are never
+replaced. A timed-out export still has an uncertain outcome; inspect the marker
+and collector state before retrying. This adds work only to explicit export jobs.
+
+
+Dashboard Status adds `native_window_active`: true from native attachment until
+post-teardown cleanup finishes. `tray_resident` requires retirement, an available
+tray, no Quit and no pending Show; visible=false alone is not retirement. Cold
+tray startup has no native window. `dashboard.window_retired` logs completed
+cleanup; `dashboard.parked` follows when the resident loop waits for tray input.
+
+## Normal-launch routing
+
+The additive `normal_launches` capability identifies this workflow. Preview/status
+are bounded read jobs, off the collector lock; apply/resume/undo use writer
+admission/FIFO and refuse active recordings or maintenance leases. Setup is strict:
+clients cannot supply target paths, file contents or undo/recovery operations.
+Desktop IDs are validated and resolved from installed entries; executable identity
+must match the saved profile. Apply requires a current iGPU target and a fresh
+preview token including profile/source/current artifact state. Tokens are change
+detection, not authorization or signatures. Only local account access is trusted.
+
+Status phases are `installing`, `active`, `undoing`, and legacy `removing_login`. Configured artifacts are not
+placement evidence. `verify_trial` also verifies an existing saved registration;
+its sustained rendering and decoding evidence remains identity-bound and separate.
+Checks are on demand; external changes do not trigger silent automatic repair.
+`launch --normal` can forward browser inputs only when all live Firefox-family
+PID/start identities belong to the matching registered profile/GPU. It refuses
+unknown instances, including after uncoordinated collector restarts.
+
+Managed profiles cannot be edited/deleted or marked Managed elsewhere before
+Undo. The normal-launch journal is private internal state, never a public RPC
+payload. Errors and events omit its original/generated content.
+
+
+## Primary app workflow and automatic evidence
+
+`simple_app_routing` advertises `app_route_preview/apply`. Preview uses two bounded
+read slots and imports the original launcher's settings without writing a profile.
+Apply uses mutation admission/FIFO, refuses recordings/maintenance and commits
+private prepared settings before publishing derived launchers. No caller-authored
+profiles, GPU selector, artifacts or recovery operations are accepted by these
+methods. A single discovered iGPU is required; custom GPU selection stays advanced.
+
+`candidates` adds optional `verification`, computed from the existing last-15-second
+ring for saved iGPU registrations. No process scanning/RPC is added for verification.
+Evidence requires live PID/start identities and matching effective registered
+settings; a reused settings name cannot inherit another intent's confirmation.
+Rendering and decoding remain independent. Unregistered, idle, unavailable and
+stale states must not be shown as successful verification.
+
+Normal setup rejects `login:true`; only legacy retirement/Undo can edit autostart
+or session exclusions. `normal_launch_remove_login` has a durable removing phase;
+conflicts preserve edits and undo data. Journal schema 2 includes optional prepared
+settings and ownership; schema 1 is readable but old binaries cannot rewrite v2.
+Undo removes unchanged auto-created settings and retains pre-existing/edited ones.
+Runtime dashboard view IDs are 0=GPU Activity, 1=Applications (default), and
+2=Launch Settings. Retired IDs 3/4 are restricted to screenshot-feature compatibility
+fixtures; normal builds normalize retired/invalid selections to Applications.
+The control API gains no view-selection method. Recording/placement collector
+APIs and the CLI remain compatible, but those pages are absent from the dashboard.
+
+
+## GPU presentation metadata
+
+`Gpu` adds optional `display_name` and `display_name_source` strings. They default
+to null when reading older snapshots/recordings. `name` remains the existing raw
+diagnostic name and `pci` remains authoritative identity. Clients may prefer a
+non-null display label, but must never route by it. Sources describe sysfs product
+metadata, an exact local libdrm device/revision match, or host CPU context when an
+iGPU model is unavailable. CPU context is not a GPU model or measured capability.
+No operation signatures, sampling defaults or persistence schemas change.
+
+### Separate launcher publication
+
+`create_launcher` resolves the saved profile by name on the collector's serialized
+writer, outside the sampler lock. It is a mutation subject to admission and update
+maintenance exclusion. It does not edit profiles, normal-launch routing or defaults.
+Publication syncs a private temporary file, then atomically links it without
+replacement; existing files and symlinks are errors, including identical shortcuts.
+A parent-directory sync failure after publication is a logged durability warning.
+On an uncertain timeout, inspect the destination before retrying. CLI and dashboard
+use this same endpoint rather than writing their own files.

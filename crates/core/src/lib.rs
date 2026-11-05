@@ -21,3 +21,7 @@ pub const BUS: &str = "io.github.igpu_man.Collector";
 pub const OBJECT: &str = "/io/github/igpu_man/Collector";
 pub const INTERFACE: &str = "io.github.igpu_man.Collector1";
 pub const API_VERSION: u32 = 1;
+
+pub mod normal_launch;
+
+mod gpu_names;

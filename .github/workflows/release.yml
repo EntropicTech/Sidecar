@@ -12,9 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ inputs.tag }}
+          persist-credentials: false
       - name: Install build tools
         run: pacman -Syu --noconfirm python git github-cli
       - name: Prepare reviewed source assets

@@ -219,6 +219,22 @@ pub struct KeepOutcome {
     pub launcher: Option<PathBuf>,
     pub warning: Option<String>,
 }
+/// Publish an explicit saved-profile shortcut without ever replacing an existing
+/// file (including symlinks). All callers share the same atomic publication path.
+pub fn create_profile_launcher(
+    paths: &crate::config::Paths,
+    profile: &Profile,
+    cli: &Path,
+) -> Result<PathBuf> {
+    anyhow::ensure!(cli.is_absolute(), "Launcher requires an absolute CLI path");
+    let content = desktop_entry(profile, cli)?;
+    let path = paths
+        .applications
+        .join(format!("igpu-man-{}.desktop", profile.name));
+    publish_launcher(&path, &content)?;
+    Ok(path)
+}
+
 fn publish_launcher(path: &Path, content: &str) -> Result<()> {
     use std::{io::Write, os::unix::fs::PermissionsExt};
     let parent = path.parent().context("Launcher has no parent")?;
@@ -230,7 +246,7 @@ fn publish_launcher(path: &Path, content: &str) -> Result<()> {
     temp.as_file().sync_all()?;
     temp.persist_noclobber(path)
         .map_err(|e| e.error)
-        .context("Launcher appeared concurrently; it was preserved")?;
+        .context("Launcher already exists or appeared concurrently; it was preserved")?;
     if let Err(error) = fs::File::open(parent).and_then(|f| f.sync_all()) {
         crate::logging::event(
             "warn",
@@ -362,6 +378,65 @@ pub fn keep_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn separate_launcher_preserves_files_symlinks_and_concurrent_winners() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::config::Paths {
+            config: dir.path().join("config.toml"),
+            data: dir.path().into(),
+            applications: dir.path().join("applications"),
+        };
+        let profile = Profile {
+            name: "shortcut".into(),
+            executable: "/bin/true".into(),
+            ..Default::default()
+        };
+        let cli = Path::new("/tmp/igpu-man");
+        assert!(create_profile_launcher(&paths, &profile, Path::new("relative")).is_err());
+        assert!(!paths.applications.exists());
+        let path = create_profile_launcher(&paths, &profile, cli).unwrap();
+        let original = fs::read(&path).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert!(create_profile_launcher(&paths, &profile, cli).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        fs::remove_file(&path).unwrap();
+        let target = dir.path().join("original");
+        fs::write(&target, "user-owned").unwrap();
+        symlink(&target, &path).unwrap();
+        assert!(create_profile_launcher(&paths, &profile, cli).is_err());
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "user-owned");
+        fs::remove_file(&path).unwrap();
+        // A dangling symlink is also an existing destination.
+        fs::remove_file(&target).unwrap();
+        symlink(&target, &path).unwrap();
+        assert!(create_profile_launcher(&paths, &profile, cli).is_err());
+        assert!(!target.exists());
+        fs::remove_file(&path).unwrap();
+        let gate = std::sync::Barrier::new(2);
+        let outcomes = std::thread::scope(|scope| {
+            let a = scope.spawn(|| {
+                gate.wait();
+                create_profile_launcher(&paths, &profile, cli)
+            });
+            let b = scope.spawn(|| {
+                gate.wait();
+                create_profile_launcher(&paths, &profile, cli)
+            });
+            [a.join().unwrap(), b.join().unwrap()]
+        });
+        assert_eq!(outcomes.iter().filter(|r| r.is_ok()).count(), 1);
+        assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(fs::read_dir(&paths.applications).unwrap().count(), 1);
+    }
+
     #[test]
     fn interrupted_keep_reconciles_before_and_after_publish_without_clobbering_conflicts() {
         let dir = tempfile::tempdir().unwrap();
@@ -519,6 +594,8 @@ mod tests {
         let gpu = Gpu {
             pci: "0000:0e:00.0".into(),
             name: "test".into(),
+            display_name: None,
+            display_name_source: None,
             alias: "igpu".into(),
             integrated: true,
             card: "card9".into(),
@@ -543,5 +620,130 @@ mod tests {
         assert!(!firefox_running(dir.path(), 12));
         fs::write(proc.join("comm"), "browser-helper").unwrap();
         assert!(!firefox_running(dir.path(), 99));
+    }
+}
+
+/// An ordinary desktop link may reach an already managed Firefox. Registration
+/// is launch intent, not proof of current renderer/decoder placement. All live
+/// Firefox-family identities must be covered; unknown/reused instances refuse.
+pub fn registered_firefox_instance(
+    snapshot: &Snapshot,
+    profile: &Profile,
+    proc: &Path,
+    own_pid: u32,
+) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(entries) = fs::read_dir(proc) else {
+        return false;
+    };
+    let mut seen = false;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return false;
+        };
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+            continue;
+        };
+        if pid == own_pid
+            || !fs::metadata(entry.path()).is_ok_and(|m| m.uid() == unsafe { libc::geteuid() })
+        {
+            continue;
+        }
+        let executable = fs::read_link(entry.path().join("exe")).unwrap_or_default();
+        let firefox = is_firefox(&executable.to_string_lossy())
+            || fs::read_to_string(entry.path().join("comm")).is_ok_and(|s| is_firefox(s.trim()));
+        if !firefox {
+            continue;
+        }
+        let Some((id, ..)) = read_process_stat(&entry.path().join("stat"), pid) else {
+            return false;
+        };
+        if !snapshot.applications.iter().any(|app| {
+            app.launch_id.is_some()
+                && app.profile_name.as_deref() == Some(&profile.name)
+                && app.requested_gpu.as_deref() == Some(&profile.gpu)
+                && app.processes.iter().any(|p| p.id == id)
+        }) {
+            return false;
+        }
+        seen = true;
+    }
+    seen
+}
+
+#[cfg(test)]
+mod normal_instance_tests {
+    use super::*;
+    #[test]
+    fn desktop_forwarding_requires_all_live_firefox_pid_start_identities() {
+        let d = tempfile::tempdir().unwrap();
+        let process = d.path().join("99");
+        fs::create_dir(&process).unwrap();
+        std::os::unix::fs::symlink("/usr/lib/firefox/firefox", process.join("exe")).unwrap();
+        fs::write(process.join("comm"), "firefox").unwrap();
+        fs::write(
+            process.join("stat"),
+            "99 (firefox) S 1 0 0 0 0 0 0 0 0 0 12 13 0 0 0 0 0 0 456 0",
+        )
+        .unwrap();
+        let profile = Profile {
+            name: "browser".into(),
+            executable: "firefox".into(),
+            gpu: "0000:01:00.0".into(),
+            ..Default::default()
+        };
+        let mut collector = crate::collector::Collector::new(
+            d.path(),
+            d.path(),
+            Diagnostics {
+                session: "fixture".into(),
+                kwin_support: None,
+                display_configuration: None,
+                versions: Default::default(),
+                notes: vec![],
+            },
+        );
+        let mut sample = collector.sample(&crate::config::Config::default());
+        assert!(!registered_firefox_instance(&sample, &profile, d.path(), 1));
+        let id = ProcessId {
+            pid: 99,
+            start_ticks: 456,
+        };
+        let cpu = Metric::measured(0.0, "%", "fixture");
+        sample.applications.push(Application {
+            id: id.clone(),
+            launch_id: Some(id.clone()),
+            profile_name: Some("browser".into()),
+            name: "Firefox".into(),
+            executable: "firefox".into(),
+            processes: vec![Process {
+                id: id.clone(),
+                parent: 1,
+                executable: "firefox".into(),
+                name: "firefox".into(),
+                cpu_percent: cpu.clone(),
+            }],
+            requested_gpu: Some(profile.gpu.clone()),
+            observed_gpus: vec![],
+            placement: "unknown".into(),
+            gpus: Default::default(),
+            cpu_percent: cpu,
+        });
+        assert!(registered_firefox_instance(&sample, &profile, d.path(), 1));
+        sample.applications[0].processes[0].id.start_ticks = 455;
+        assert!(!registered_firefox_instance(&sample, &profile, d.path(), 1));
+        sample.applications[0].processes[0].id.start_ticks = 456;
+        sample.applications[0].requested_gpu = Some("other".into());
+        assert!(!registered_firefox_instance(&sample, &profile, d.path(), 1));
+        sample.applications[0].requested_gpu = Some(profile.gpu.clone());
+        let other = d.path().join("100");
+        fs::create_dir(&other).unwrap();
+        fs::write(other.join("comm"), "firefox").unwrap();
+        fs::write(
+            other.join("stat"),
+            "100 (firefox) S 1 0 0 0 0 0 0 0 0 0 12 13 0 0 0 0 0 0 999 0",
+        )
+        .unwrap();
+        assert!(!registered_firefox_instance(&sample, &profile, d.path(), 1));
     }
 }

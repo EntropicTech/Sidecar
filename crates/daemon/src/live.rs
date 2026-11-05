@@ -60,11 +60,34 @@ impl View {
                 snapshot.active_recording = self.snapshot.active_recording;
                 Ok(serde_json::to_value(snapshot)?)
             }
-            Operation::Candidates => Ok(serde_json::to_value(applications::candidates(
-                &self.snapshot,
-                &self.ring,
-                &self.config,
-            ))?),
+            Operation::Candidates => {
+                let mut candidates =
+                    applications::candidates(&self.snapshot, &self.ring, &self.config);
+                for candidate in &mut candidates {
+                    if let Some(registration) = candidate
+                        .launch_path
+                        .registration
+                        .as_ref()
+                        .and_then(|id| self.launches.iter().find(|l| &l.process == id))
+                    {
+                        let saved = registration.profile.as_ref().is_some_and(|p| {
+                            self.config
+                                .profiles
+                                .iter()
+                                .any(|saved| saved.name == p.name && same_launch_settings(saved, p))
+                        });
+                        let igpu = self
+                            .snapshot
+                            .gpus
+                            .iter()
+                            .any(|g| g.integrated && g.pci == registration.gpu);
+                        if saved && igpu {
+                            candidate.verification = Some(self.verify(&registration.process));
+                        }
+                    }
+                }
+                Ok(serde_json::to_value(candidates)?)
+            }
             Operation::Profiles => Ok(serde_json::to_value(&self.config.profiles)?),
             Operation::Management => Ok(serde_json::to_value(&self.config.managed_elsewhere)?),
             Operation::PendingTrials => Ok(serde_json::to_value(
@@ -98,4 +121,19 @@ impl View {
             applications::Verification {application_seen:false,rendering:applications::Placement::Waiting,decoding:applications::Placement::Waiting,other_engines:applications::Placement::Waiting,can_keep:false,evidence_seconds:0.,explanation:"Launch is not tracked; repeat the trial if the collector restarted or the app exited.".into()}
         }
     }
+}
+
+// A reused settings name must not inherit evidence from another launch intent.
+fn same_launch_settings(a: &Profile, b: &Profile) -> bool {
+    a.executable == b.executable
+        && a.args == b.args
+        && a.gpu == b.gpu
+        && a.environment == b.environment
+        && a.working_directory == b.working_directory
+        && a.vulkan_only == b.vulkan_only
+        && a.firefox == b.firefox
+        && a.record == b.record
+        && a.mangohud == b.mangohud
+        && a.desktop.as_ref().and_then(|d| d.file_argument)
+            == b.desktop.as_ref().and_then(|d| d.file_argument)
 }

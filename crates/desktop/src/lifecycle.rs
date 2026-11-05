@@ -18,6 +18,7 @@ struct State {
     quitting: bool,
     wants_open: bool,
     visible: bool,
+    native_window_active: bool,
     view: usize,
     updates: u64,
     telemetry_wakeups: u64,
@@ -66,6 +67,7 @@ impl Control {
         }
         if let Ok(mut state) = self.state.lock() {
             state.windows_created += 1;
+            state.native_window_active = true;
         }
     }
     pub fn detach(&self) {
@@ -101,6 +103,7 @@ impl Control {
         self.detach();
         if let Ok(mut state) = self.state.lock() {
             state.visible = false;
+            state.native_window_active = false;
             state.telemetry_ns = 0;
             state.updates += 1;
         }
@@ -168,7 +171,7 @@ impl Control {
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("GUI lifecycle lock poisoned".into()))?;
         Ok(json!({"schema_version":1,"source_sha256":igpu_core::build::SOURCE_ID,"pid":std::process::id(),"ready":state.ready,"quitting":state.quitting,
-            "windows_created":state.windows_created,"visible":state.visible,"view":state.view,"tray_resident":state.ready&&!state.visible&&!state.quitting&&state.tray,"updates":state.updates,"telemetry_wakeups":state.telemetry_wakeups,"active_trial":state.active_trial,"tray_available":state.tray,"telemetry_monotonic_ns":state.telemetry_ns,"worker_health":state.worker_health}).to_string())
+            "windows_created":state.windows_created,"visible":state.visible,"view":state.view,"native_window_active":state.native_window_active,"tray_resident":state.ready&&!state.native_window_active&&!state.wants_open&&!state.quitting&&state.tray,"updates":state.updates,"telemetry_wakeups":state.telemetry_wakeups,"active_trial":state.active_trial,"tray_available":state.tray,"telemetry_monotonic_ns":state.telemetry_ns,"worker_health":state.worker_health}).to_string())
     }
 }
 
@@ -369,9 +372,9 @@ pub fn drain_connection(connection: zbus::blocking::Connection) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
-    fn fixture() -> (Control, mpsc::Receiver<Action>) {
+    pub(crate) fn fixture() -> (Control, mpsc::Receiver<Action>) {
         let (sender, receiver) = mpsc::channel();
         (
             Control {
@@ -381,6 +384,28 @@ mod tests {
             },
             receiver,
         )
+    }
+    #[test]
+    fn tray_residency_waits_for_native_retirement_and_pending_show() {
+        let (control, _receiver) = fixture();
+        let status =
+            || serde_json::from_str::<serde_json::Value>(&control.status().unwrap()).unwrap();
+        control.tray_state(true);
+        assert_eq!(status()["tray_resident"], true); // Cold tray, no window.
+        control.show_requested();
+        assert_eq!(status()["tray_resident"], false);
+        control.attach(egui::Context::default());
+        control.hide_requested();
+        control.update(false, false, false, true, 0);
+        assert_eq!(status()["native_window_active"], true);
+        assert_eq!(status()["tray_resident"], false); // Invisible is not retired.
+        control.detach();
+        assert_eq!(status()["tray_resident"], false);
+        control.parked();
+        assert_eq!(status()["native_window_active"], false);
+        assert_eq!(status()["tray_resident"], true);
+        control.show_requested();
+        assert_eq!(status()["tray_resident"], false);
     }
     #[test]
     fn close_can_be_followed_by_show_without_losing_reopen() {
